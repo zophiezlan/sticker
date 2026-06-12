@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>  <!-- NotifyIcon for the tray -->
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Sticker</AssemblyName>
+    <RootNamespace>StickerApp</RootNamespace>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <!-- Precompile to native code on publish: snappier cold start -->
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <Version>1.0.0</Version>
+    <Product>Sticker</Product>
+    <Description>Floating, background-removed image cutouts for the Windows desktop.</Description>
+    <Copyright>© 2026 Zophie</Copyright>
+    <!-- Allows compile-checking on non-Windows CI; harmless on Windows -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- UseWindowsForms injects these as global usings, which collide with WPF
+         types (Application, MenuItem, Point...). We access WinForms/Drawing
+         only via explicit aliases in App.xaml.cs. -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- DirectML build = GPU inference on any DX12 adapter, CPU fallback at runtime -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.24.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Loose .ico in the output so the Explorer command can reference it -->
+    <Content Include="app.ico" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

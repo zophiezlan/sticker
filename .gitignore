@@ -1,0 +1,17 @@
+# Images (test photos)
+*.jpg
+*.png
+!StickerApp/app.png
+
+# Compiled Python files
+*.pyc
+__pycache__
+
+# .NET build output
+/*/bin/
+/*/obj/
+/publish/
+
+# IDE
+.vs/
+*.user

@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Emits StickerShell.comhost.dll: a native shim exporting DllGetClassObject,
+         which Explorer loads to activate our IExplorerCommand class. -->
+    <EnableComHosting>true</EnableComHosting>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+
+</Project>
