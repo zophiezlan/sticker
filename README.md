@@ -1,79 +1,127 @@
-# Sticker
+# ✂️ Sticker
 
-Right-click any image in Explorer → **Open as sticker** → it floats on your desktop as a draggable cut-out with the background removed. Like pulling a sticker off the photo.
+**Turn any image into a floating desktop sticker — background magically removed, in one right-click.**
 
-Background removal runs locally (ONNX, GPU via DirectML), clicks pass through the transparent parts to whatever's underneath, and stickers survive reboots.
+> Right-click a photo in Explorer → *Open as sticker* → boom, the subject peels off and hovers on your desktop. Drag it anywhere. It clicks through the transparent parts. It survives reboots. It's just… fun.
 
-## Features
+---
 
-- **Top-level Explorer context menu** entry on Windows 11 (plus classic-menu fallback)
-- **Paste as sticker** — global `Ctrl+Alt+V` turns screenshots/copied images into stickers
-- **Local AI matting** — ISNet by default; re-matte any sticker with U2Net-Human (portraits) or BiRefNet (highest quality) if the result isn't right
-- **Pin mode** — make a sticker click-through, a pure overlay
-- **Session persistence** — positions, sizes, rotation, opacity all restored via `--restore` or "Start with Windows"
-- **Tray app** — single resident process, model stays warm, stickers open instantly
-- Rotate, flip, opacity, original↔cutout toggle, save cutout as PNG
+## ✨ Why Sticker?
 
-## Install
+| | |
+|---|---|
+| 🖱️ **One click** | Right-click any image → it's a sticker. No extra apps, no export steps. |
+| 🧠 **AI-powered** | Background removal runs 100% locally on your GPU (or CPU). No uploads, no API keys, no internet needed after setup. |
+| 👻 **Click-through** | Transparent areas are truly transparent — your mouse passes right through to whatever's underneath. |
+| 💾 **Remembers everything** | Close your laptop, reboot, whatever — your stickers come back exactly where you left them. |
+| ⚡ **Instant after first use** | The AI model stays warm in a tiny tray app. Second sticker onwards? Sub-second. |
 
-Prereqs: Windows 11, [.NET 10 SDK](https://dotnet.microsoft.com/download), Developer Mode (Settings → System → For developers — needed for the context-menu package).
+---
+
+## 🚀 Get Started
+
+**You'll need:** Windows 11 • [.NET 10 SDK](https://dotnet.microsoft.com/download) • Developer Mode turned on (Settings → System → For developers)
+
+Then just run:
 
 ```powershell
 .\setup_modern_menu.ps1
 ```
 
-That publishes both projects into `publish\` and registers the Explorer extension. Re-run it after any rebuild. Remove with `-Uninstall`.
+That's it! You'll see **"Open as sticker"** in your right-click menu on any image file.
 
-No Developer Mode? Use the classic menu instead (entry lands under "Show more options"):
+> 💡 **No Developer Mode?** No problem — use the classic menu fallback instead:
+> ```powershell
+> dotnet publish StickerApp\StickerApp.csproj -c Release
+> .\install_context_menu.ps1
+> ```
+> The entry will appear under "Show more options" in the context menu.
 
-```powershell
-dotnet publish StickerApp\StickerApp.csproj -c Release
-.\install_context_menu.ps1
+The first time you create a sticker, the AI model downloads automatically (~180 MB, one-time). After that, everything is instant and fully offline.
+
+To uninstall, run `.\setup_modern_menu.ps1 -Uninstall`.
+
+---
+
+## 🎮 Using Stickers
+
+Your cursor needs to be over the **visible subject** (transparent areas pass clicks through). Here's what you can do:
+
+| | Action | What it does |
+|---|---|---|
+| 🖱️ | Drag | Move the sticker around |
+| 🔍 | Scroll / `+` `-` | Resize (hold Ctrl for fine-tuning) |
+| 🌫️ | Shift + scroll | Adjust opacity |
+| 🔄 | `R` / Shift+`R` | Rotate 15° |
+| ↔️ | `F` | Flip horizontal |
+| 👁️ | `D` / double-click | Toggle between cutout and original |
+| 💾 | `S` | Save cutout as PNG |
+| ❌ | Esc / middle-click | Close sticker |
+| 📋 | Right-click | Full menu (pin, always-on-top, re-matte…) |
+
+### Tray Menu
+
+Sticker lives in your system tray with quick access to:
+
+- **Paste as sticker** (`Ctrl+Alt+V`) — screenshot something, hit the hotkey, instant sticker
+- **Open images…** — pick files manually
+- **Restore last session** — bring back all your stickers from last time
+- **Start with Windows** — your stickers are always there when you log in
+
+### Command Line
+
+```
+Sticker.exe photo.jpg [more-images...]
+Sticker.exe --no-matte logo.png          # already transparent, skip AI
+Sticker.exe --restore                     # reopen last session
+Sticker.exe --model birefnet-general img.jpg
 ```
 
-First sticker ever downloads the matting model (~180 MB) to `~/.u2net`.
+---
 
-## Controls
+## 🧠 AI Models
 
-Cursor must be over the **subject** — transparent areas click through. If scrolling seems dead, use `+`/`-`.
+Not every background removal is perfect on the first try — so Sticker ships with three models you can swap between instantly (right-click → "Re-matte"):
 
-| Action              | Effect                                                             |
-| ------------------- | ------------------------------------------------------------------ |
-| Drag                | Move                                                               |
-| Scroll or `+` / `-` | Resize (Ctrl+scroll = fine)                                        |
-| Shift+scroll        | Opacity                                                            |
-| `R` / Shift+`R`     | Rotate 15°                                                         |
-| `F`                 | Flip horizontal                                                    |
-| `D` / double-click  | Toggle original ↔ cutout                                           |
-| `S`                 | Save cutout as PNG                                                 |
-| Esc / middle-click  | Close                                                              |
-| Right-click         | Menu: pin, always-on-top, rotate 90°, re-matte with another model… |
+| Model | Best for | Speed | Size |
+|---|---|---|---|
+| `isnet-general-use` | Everything (default) | ⚡ Fast | ~180 MB |
+| `u2net_human_seg` | People & portraits | ⚡ Fast | ~180 MB |
+| `birefnet-general` | Maximum quality | 🐢 Slower | ~900 MB |
 
-**Tray menu:** Paste as sticker (`Ctrl+Alt+V`), Open images, Restore last session, Unpin all, Close all, Start with Windows, Exit.
+Each model's result is cached separately — switching between them is instant after the first run. Set a different default with `--model` or the `STICKER_MODEL` environment variable.
 
-**CLI:** `Sticker.exe img.jpg [...]` · `--no-matte` (image already transparent) · `--restore` · `--model <name>`
+---
 
-## Models
+## 🏗️ How It Works
 
-| Model               | Best for                  | Notes                  |
-| ------------------- | ------------------------- | ---------------------- |
-| `isnet-general-use` | everything (default)      | good edges, fast       |
-| `u2net_human_seg`   | people/portraits          | often better on hair   |
-| `birefnet-general`  | when quality matters most | ~900 MB download, slow |
+```
+sticker/
+├── StickerApp/       → WPF tray app (the main show)
+├── StickerShell/     → Explorer right-click menu integration
+└── prototype/        → Original Python version (still works!)
+```
 
-Right-click a sticker → "Re-matte — …" to compare; each model's result is cached separately so switching back is instant. Default model: `--model` flag or `STICKER_MODEL` env var.
+**StickerApp** is a WPF app where each sticker is a borderless, transparent window with per-pixel alpha hit-testing — your clicks pass through transparent pixels for free. Background removal uses ONNX Runtime with DirectML (GPU acceleration on any DX12 graphics card, automatic CPU fallback). A single tray process keeps the model warm so subsequent stickers open instantly.
 
-## How it works
+**StickerShell** is a COM server (`IExplorerCommand`) that puts "Open as sticker" in the top-level Windows 11 context menu — no "Show more options" submenu needed. Registered via a sparse package.
 
-- `StickerApp/` — WPF tray app. Each sticker is a borderless `AllowsTransparency` window (layered window → per-pixel alpha click-through for free). Matting via ONNX Runtime + DirectML, CPU fallback. Single instance via mutex + named pipe.
-- `StickerShell/` — tiny `IExplorerCommand` COM server (C#, `EnableComHosting`) giving the top-level Win11 menu entry, registered through a loose sparse package (`AppxManifest.xml`).
-- `prototype/` — the original Python version (rembg + PyQt6), kept as a test bench. It shares the model folder, matte cache, _and_ `session.json` with the C# app.
-- Caches live in `~/.sticker_cache` (mattes keyed on path+mtime+model, `session.json`, clipboard pastes); models in `~/.u2net`.
+**prototype/** is the original Python version (rembg + PyQt6). It shares the model folder (`~/.u2net`), matte cache (`~/.sticker_cache`), and session file with the C# app — useful as a test bench or if you prefer Python.
 
-## Troubleshooting
+---
 
-- **NU1100 on first build** — your SDK has no NuGet feed: `dotnet nuget add source https://api.nuget.org/v3/index.json -n nuget.org`
-- **Package registration fails** — Developer Mode is off.
-- **Menu entry does nothing** — set user env var `STICKER_SHELL_LOG=1`, restart Explorer, click the entry, read `%TEMP%\sticker-shell.log`.
-- **Menu entry missing after rebuild** — re-run `setup_modern_menu.ps1`; the registration pins `publish\`, so don't move/delete that folder.
-- **Stickers died with the terminal** — you launched via `dotnet run`; use the published exe (`start` it, or the context menu).
+## 🛠️ Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| **NU1100 on first build** | Your SDK is missing the NuGet feed. Run: `dotnet nuget add source https://api.nuget.org/v3/index.json -n nuget.org` |
+| **Package registration fails** | Developer Mode is off. Turn it on in Settings → System → For developers. |
+| **Menu entry does nothing** | Set env var `STICKER_SHELL_LOG=1`, restart Explorer, try again, then check `%TEMP%\sticker-shell.log` |
+| **Menu entry vanished after rebuild** | Re-run `.\setup_modern_menu.ps1` — the registration points at `publish\`, so don't move that folder |
+| **Stickers die when terminal closes** | Don't use `dotnet run` — use the published exe (or launch via the context menu) |
+
+---
+
+## 📄 License
+
+© 2026 Zophie
