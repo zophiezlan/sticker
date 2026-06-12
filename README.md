@@ -126,4 +126,4 @@ sticker/
 
 ## 📄 License
 
-© 2026 Zophie
+[MIT](LICENSE) — © 2026 Zophie
