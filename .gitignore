@@ -11,6 +11,10 @@ __pycache__
 /*/bin/
 /*/obj/
 /publish/
+/publish-x64/
+
+# Inno Setup output
+/installer/Output/
 
 # IDE
 .vs/

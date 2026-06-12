@@ -1,0 +1,44 @@
+name: Release
+
+# Push a tag like v1.0.1 to build the installer and attach it to a GitHub release.
+#   git tag v1.0.1 && git push origin v1.0.1
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Version from tag
+        id: ver
+        shell: bash
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish (self-contained win-x64)
+        run: >
+          dotnet publish StickerApp -c Release -r win-x64 --self-contained
+          -p:Version=${{ steps.ver.outputs.version }}
+          -o publish-x64
+
+      - name: Build installer (Inno Setup is preinstalled on windows-latest)
+        run: >
+          iscc /DAppVersion=${{ steps.ver.outputs.version }}
+          /DPublishDir=..\publish-x64
+          installer\Sticker.iss
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: installer/Output/StickerSetup-${{ steps.ver.outputs.version }}.exe
+          generate_release_notes: true
