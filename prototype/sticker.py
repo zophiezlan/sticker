@@ -51,6 +51,7 @@ _sessions: dict = {}
 def _model_session(model: str):
     if model not in _sessions:
         from rembg import new_session
+
         _sessions[model] = new_session(model)
     return _sessions[model]
 
@@ -68,6 +69,7 @@ def remove_background(src: Path, model: str, force: bool = False) -> Path:
         return out
     from rembg import remove  # lazy: model load is slow
     from PIL import Image
+
     CACHE_DIR.mkdir(exist_ok=True)
     result = remove(Image.open(src), session=_model_session(model))
     result.save(out)
@@ -78,8 +80,13 @@ class StickerWindow(QWidget):
     instances: list["StickerWindow"] = []
     _quitting = False
 
-    def __init__(self, image_path: Path, source_path: Path,
-                 no_matte: bool = False, state: dict | None = None):
+    def __init__(
+        self,
+        image_path: Path,
+        source_path: Path,
+        no_matte: bool = False,
+        state: dict | None = None,
+    ):
         super().__init__()
         self.source_path = source_path
         self.no_matte = no_matte
@@ -106,8 +113,11 @@ class StickerWindow(QWidget):
         self.label.setScaledContents(True)
 
         screen = QGuiApplication.primaryScreen().availableGeometry()
-        self.scale = min(1.0, screen.width() * 0.4 / self._base.width(),
-                         screen.height() * 0.4 / self._base.height())
+        self.scale = min(
+            1.0,
+            screen.width() * 0.4 / self._base.width(),
+            screen.height() * 0.4 / self._base.height(),
+        )
 
         if state:
             self.scale = state.get("scale", self.scale)
@@ -121,12 +131,15 @@ class StickerWindow(QWidget):
         if state and "x" in state:
             self.move(state["x"], state["y"])
             if not state.get("on_top", True):
-                self.setWindowFlags(self.windowFlags()
-                                    & ~Qt.WindowType.WindowStaysOnTopHint)
+                self.setWindowFlags(
+                    self.windowFlags() & ~Qt.WindowType.WindowStaysOnTopHint
+                )
         else:
             offset = 30 * (len(StickerWindow.instances) % 10)
-            self.move(screen.center() - QPoint(self.width() // 2 - offset,
-                                               self.height() // 2 - offset))
+            self.move(
+                screen.center()
+                - QPoint(self.width() // 2 - offset, self.height() // 2 - offset)
+            )
 
         StickerWindow.instances.append(self)
         self.show()
@@ -139,13 +152,19 @@ class StickerWindow(QWidget):
             t.scale(-1, 1)
         if self.rotation:
             t.rotate(self.rotation)
-        pm = (self._base.transformed(t, Qt.TransformationMode.SmoothTransformation)
-              if not t.isIdentity() else self._base)
+        pm = (
+            self._base.transformed(t, Qt.TransformationMode.SmoothTransformation)
+            if not t.isIdentity()
+            else self._base
+        )
         w = max(MIN_SIZE, min(MAX_SIZE, int(pm.width() * self.scale)))
         self.scale = w / pm.width()  # keep scale consistent after clamping
-        scaled = pm.scaled(w, max(1, int(w * pm.height() / pm.width())),
-                           Qt.AspectRatioMode.KeepAspectRatio,
-                           Qt.TransformationMode.SmoothTransformation)
+        scaled = pm.scaled(
+            w,
+            max(1, int(w * pm.height() / pm.width())),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
         self.label.setPixmap(scaled)
         self.label.resize(scaled.size())
         self.resize(scaled.size())
@@ -162,7 +181,8 @@ class StickerWindow(QWidget):
         return {
             "source": str(self.source_path),
             "no_matte": self.no_matte,
-            "x": self.x(), "y": self.y(),
+            "x": self.x(),
+            "y": self.y(),
             "scale": self.scale,
             "rotation": self.rotation,
             "flipped": self.flipped,
@@ -176,14 +196,15 @@ class StickerWindow(QWidget):
             return
         try:
             CACHE_DIR.mkdir(exist_ok=True)
-            STATE_FILE.write_text(json.dumps(
-                [w.state() for w in cls.instances], indent=2))
+            STATE_FILE.write_text(
+                json.dumps([w.state() for w in cls.instances], indent=2)
+            )
         except OSError as ex:
             print(f"Could not save session: {ex}", file=sys.stderr)
 
     @classmethod
     def close_all(cls):
-        cls.save_session()       # keep session so --restore brings them back
+        cls.save_session()  # keep session so --restore brings them back
         cls._quitting = True
         QApplication.quit()
 
@@ -269,7 +290,8 @@ class StickerWindow(QWidget):
     def _save_png(self):
         default = self.source_path.with_name(self.source_path.stem + "-cutout.png")
         dest, _ = QFileDialog.getSaveFileName(
-            self, "Save cutout", str(default), "PNG image (*.png)")
+            self, "Save cutout", str(default), "PNG image (*.png)"
+        )
         if not dest:
             return
         t = QTransform()
@@ -277,8 +299,11 @@ class StickerWindow(QWidget):
             t.scale(-1, 1)
         if self.rotation:
             t.rotate(self.rotation)
-        pm = (self._matted.transformed(t, Qt.TransformationMode.SmoothTransformation)
-              if not t.isIdentity() else self._matted)
+        pm = (
+            self._matted.transformed(t, Qt.TransformationMode.SmoothTransformation)
+            if not t.isIdentity()
+            else self._matted
+        )
         pm.save(dest, "PNG")
 
     def _rematte(self):
@@ -306,14 +331,14 @@ class StickerWindow(QWidget):
     def contextMenuEvent(self, e):
         menu = QMenu(self)
         on_top = QAction("Always on top", menu, checkable=True)
-        on_top.setChecked(bool(self.windowFlags()
-                               & Qt.WindowType.WindowStaysOnTopHint))
+        on_top.setChecked(bool(self.windowFlags() & Qt.WindowType.WindowStaysOnTopHint))
         on_top.triggered.connect(self._toggle_on_top)
         menu.addAction(on_top)
         if not self.no_matte:
             menu.addAction(
                 "Show original" if not self.showing_original else "Show cutout",
-                self._toggle_original)
+                self._toggle_original,
+            )
         menu.addAction("Rotate 90° right\tR", lambda: self._rotate(90))
         menu.addAction("Rotate 90° left\tShift+R", lambda: self._rotate(-90))
         menu.addAction("Flip horizontal\tF", self._flip)
@@ -335,6 +360,7 @@ class StickerWindow(QWidget):
 
 
 # --- opening / single instance ---
+
 
 def open_one(src: Path, no_matte: bool, state: dict | None = None) -> bool:
     if not src.exists():
@@ -358,8 +384,9 @@ def restore_session() -> int:
     except (OSError, json.JSONDecodeError) as ex:
         print(f"Could not read session: {ex}", file=sys.stderr)
         return 0
-    return sum(open_one(Path(s["source"]), s.get("no_matte", False), state=s)
-               for s in entries)
+    return sum(
+        open_one(Path(s["source"]), s.get("no_matte", False), state=s) for s in entries
+    )
 
 
 def handle_payload(payload: dict):
@@ -406,7 +433,7 @@ def main():
     if "--model" in argv:
         i = argv.index("--model")
         MODEL = argv[i + 1]
-        del argv[i:i + 2]
+        del argv[i : i + 2]
     paths = [a for a in argv if not a.startswith("--")]
 
     if not paths and not restore:

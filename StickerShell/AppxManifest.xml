@@ -1,17 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
-         xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
-         xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
-         xmlns:desktop4="http://schemas.microsoft.com/appx/manifest/desktop/windows10/4"
-         xmlns:desktop5="http://schemas.microsoft.com/appx/manifest/desktop/windows10/5"
-         xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
-         xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-         IgnorableNamespaces="uap uap10 desktop4 desktop5 com rescap">
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+  xmlns:desktop4="http://schemas.microsoft.com/appx/manifest/desktop/windows10/4"
+  xmlns:desktop5="http://schemas.microsoft.com/appx/manifest/desktop/windows10/5"
+  xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap10 desktop4 desktop5 com rescap">
 
   <Identity Name="Zophie.Sticker"
-            ProcessorArchitecture="x64"
-            Publisher="CN=Zophie"
-            Version="1.0.0.0" />
+    ProcessorArchitecture="x64"
+    Publisher="CN=Zophie"
+    Version="1.0.0.0" />
 
   <Properties>
     <DisplayName>Sticker</DisplayName>
@@ -21,8 +21,8 @@
 
   <Dependencies>
     <TargetDeviceFamily Name="Windows.Desktop"
-                        MinVersion="10.0.22000.0"
-                        MaxVersionTested="10.0.26100.0" />
+      MinVersion="10.0.22000.0"
+      MaxVersionTested="10.0.26100.0" />
   </Dependencies>
 
   <Resources>
@@ -31,13 +31,13 @@
 
   <Applications>
     <Application Id="Sticker" Executable="Sticker.exe"
-                 uap10:TrustLevel="mediumIL" uap10:RuntimeBehavior="win32App">
+      uap10:TrustLevel="mediumIL" uap10:RuntimeBehavior="win32App">
       <uap:VisualElements DisplayName="Sticker"
-                          Description="Floating image cutouts"
-                          BackgroundColor="transparent"
-                          Square150x150Logo="app.png"
-                          Square44x44Logo="app.png"
-                          AppListEntry="none" />
+        Description="Floating image cutouts"
+        BackgroundColor="transparent"
+        Square150x150Logo="app.png"
+        Square44x44Logo="app.png"
+        AppListEntry="none" />
       <Extensions>
 
         <desktop4:Extension Category="windows.fileExplorerContextMenus">
@@ -67,8 +67,8 @@
           <com:ComServer>
             <com:SurrogateServer DisplayName="Open as sticker handler">
               <com:Class Id="7ad4e2c3-9b5a-4f2e-8c1d-3e5a0b6f4d21"
-                         Path="StickerShell.comhost.dll"
-                         ThreadingModel="STA" />
+                Path="StickerShell.comhost.dll"
+                ThreadingModel="STA" />
             </com:SurrogateServer>
           </com:ComServer>
         </com:Extension>

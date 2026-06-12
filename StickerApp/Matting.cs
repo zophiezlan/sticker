@@ -163,15 +163,15 @@ public sealed class Matting : IDisposable
         var small = new float[side * side];
         float min = float.MaxValue, max = float.MinValue;
         for (int y = 0; y < side; y++)
-        for (int x = 0; x < side; x++)
-        {
-            float v = output[0, 0, y, x];
-            if (sigmoid)
-                v = 1f / (1f + MathF.Exp(-v));
-            small[y * side + x] = v;
-            if (v < min) min = v;
-            if (v > max) max = v;
-        }
+            for (int x = 0; x < side; x++)
+            {
+                float v = output[0, 0, y, x];
+                if (sigmoid)
+                    v = 1f / (1f + MathF.Exp(-v));
+                small[y * side + x] = v;
+                if (v < min) min = v;
+                if (v > max) max = v;
+            }
         float range = Math.Max(max - min, 1e-6f);
 
         // --- bilinear resize mask back to original resolution ---

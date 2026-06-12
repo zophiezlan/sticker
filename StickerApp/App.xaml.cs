@@ -296,7 +296,8 @@ public partial class App : Application
             notice = new Window
             {
                 Title = "Sticker",
-                Width = 420, Height = 100,
+                Width = 420,
+                Height = 100,
                 WindowStartupLocation = WindowStartupLocation.CenterScreen,
                 ResizeMode = ResizeMode.NoResize,
                 Topmost = true,
