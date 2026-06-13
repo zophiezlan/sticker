@@ -42,7 +42,8 @@ public partial class App : Application
 
         var args = e.Args.ToList();
         bool noMatte = args.Remove("--no-matte");
-        bool restore = args.Remove("--restore");
+        bool restore = args.Remove("--resume");
+        restore |= args.Remove("--restore");  // legacy flag — kept for pre-existing autostart entries
         int mi = args.IndexOf("--model");
         if (mi >= 0 && mi + 1 < args.Count)
         {
@@ -162,22 +163,76 @@ public partial class App : Application
             is ".jpg" or ".jpeg" or ".png" or ".webp" or ".bmp" or ".gif";
 
     // --- startup toggle ---
+    //
+    // Autostart is a per-user Startup-folder shortcut, NOT a write to
+    // ...\CurrentVersion\Run. Both achieve login autostart, but the Run key is
+    // the textbook persistence location malware uses, so Defender's ML heuristics
+    // score a direct write to it harshly. A .lnk in shell:startup is the
+    // Explorer-managed, user-visible mechanism and reads as benign. The installer
+    // drops the same shortcut (same name/args), so the toggle stays in sync with it.
 
-    private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
+    private static string StartupShortcut => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.Startup), "Sticker.lnk");
 
-    private static bool IsStartupEnabled()
-    {
-        using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(RunKeyPath);
-        return key?.GetValue("Sticker") is not null;
-    }
+    private static bool IsStartupEnabled() => File.Exists(StartupShortcut);
 
     private static void SetStartup(bool enabled)
     {
-        using var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(RunKeyPath);
         if (enabled)
-            key.SetValue("Sticker", $"\"{Environment.ProcessPath}\" --restore");
-        else
-            key.DeleteValue("Sticker", throwOnMissingValue: false);
+        {
+            string exe = Environment.ProcessPath!;
+            var link = (IShellLinkW)new ShellLink();
+            link.SetPath(exe);
+            link.SetArguments("--resume");
+            link.SetWorkingDirectory(Path.GetDirectoryName(exe) ?? "");
+            link.SetIconLocation(exe, 0);
+            ((IPersistFile)link).Save(StartupShortcut, true);
+        }
+        else if (File.Exists(StartupShortcut))
+        {
+            File.Delete(StartupShortcut);
+        }
+    }
+
+    // Minimal IShellLink / IPersistFile interop to write a .lnk without pulling in
+    // the Windows Script Host (WScript.Shell), which would itself look script-y.
+    [ComImport, Guid("00021401-0000-0000-C000-000000000046")]
+    private class ShellLink { }
+
+    [ComImport, Guid("000214F9-0000-0000-C000-000000000046"),
+     InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IShellLinkW
+    {
+        void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszFile, int cch, IntPtr pfd, uint fFlags);
+        void GetIDList(out IntPtr ppidl);
+        void SetIDList(IntPtr pidl);
+        void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszName, int cch);
+        void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+        void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszDir, int cch);
+        void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string pszDir);
+        void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszArgs, int cch);
+        void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string pszArgs);
+        void GetHotkey(out short pwHotkey);
+        void SetHotkey(short wHotkey);
+        void GetShowCmd(out int piShowCmd);
+        void SetShowCmd(int iShowCmd);
+        void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszIconPath, int cch, out int piIcon);
+        void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string pszIconPath, int iIcon);
+        void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string pszPathRel, uint dwReserved);
+        void Resolve(IntPtr hwnd, uint fFlags);
+        void SetPath([MarshalAs(UnmanagedType.LPWStr)] string pszFile);
+    }
+
+    [ComImport, Guid("0000010b-0000-0000-C000-000000000046"),
+     InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IPersistFile
+    {
+        void GetClassID(out Guid pClassID);
+        [PreserveSig] int IsDirty();
+        void Load([MarshalAs(UnmanagedType.LPWStr)] string pszFileName, uint dwMode);
+        void Save([MarshalAs(UnmanagedType.LPWStr)] string pszFileName, [MarshalAs(UnmanagedType.Bool)] bool fRemember);
+        void SaveCompleted([MarshalAs(UnmanagedType.LPWStr)] string pszFileName);
+        void GetCurFile([MarshalAs(UnmanagedType.LPWStr)] out string ppszFileName);
     }
 
     // --- tray ---

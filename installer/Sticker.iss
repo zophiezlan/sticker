@@ -42,21 +42,22 @@ MinVersion=10.0.19041
 AppMutex=StickerApp.SingleInstance
 
 [Tasks]
-Name: "startup"; Description: "Start Sticker with Windows (restores your stickers at login)"; Flags: unchecked
+Name: "startup"; Description: "Start Sticker with Windows (reopens your stickers at login)"; Flags: unchecked
 
 [Files]
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 
 [Icons]
 Name: "{autoprograms}\Sticker"; Filename: "{app}\Sticker.exe"
+; Autostart via a Startup-folder shortcut (not a Run-key write) — the same .lnk
+; the in-app "Start with Windows" toggle manages, so the two stay in sync.
+Name: "{userstartup}\Sticker"; Filename: "{app}\Sticker.exe"; Parameters: "--resume"; Tasks: startup
 
 [Registry]
 ; Classic context menu: right-click any image -> (Show more options on Win11) -> Open as sticker
 Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\image\shell\OpenAsSticker"; ValueType: string; ValueData: "Open as sticker"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\image\shell\OpenAsSticker"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\Sticker.exe"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\image\shell\OpenAsSticker\command"; ValueType: string; ValueData: """{app}\Sticker.exe"" ""%1"""; Flags: uninsdeletekey
-; Same value the in-app "Start with Windows" toggle writes, so the two stay in sync
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Sticker"; ValueData: """{app}\Sticker.exe"" --restore"; Tasks: startup
 
 [Run]
 Filename: "{app}\Sticker.exe"; Description: "Launch Sticker (parks in the tray)"; Flags: postinstall nowait skipifsilent
@@ -66,10 +67,10 @@ procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usPostUninstall then
   begin
-    // Remove the autostart entry whether it was set by the installer task
-    // or by the in-app tray toggle.
-    RegDeleteValue(HKEY_CURRENT_USER,
-      'Software\Microsoft\Windows\CurrentVersion\Run', 'Sticker');
+    // Remove the autostart shortcut whether it was created by the installer
+    // task or by the in-app tray toggle. (Inno auto-removes the task-created
+    // [Icons] entry; this also covers a toggle-created one it doesn't track.)
+    DeleteFile(ExpandConstant('{userstartup}\Sticker.lnk'));
     // Note: ~/.sticker_cache (models, mattes, session) is left in place so a
     // reinstall doesn't re-download models. Mention manual cleanup in README.
   end;

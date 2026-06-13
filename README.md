@@ -75,7 +75,7 @@ Sticker lives in your system tray with quick access to:
 ```
 Sticker.exe photo.jpg [more-images...]
 Sticker.exe --no-matte logo.png          # already transparent, skip AI
-Sticker.exe --restore                     # reopen last session
+Sticker.exe --resume                      # reopen last session
 Sticker.exe --model birefnet-general img.jpg
 ```
 
