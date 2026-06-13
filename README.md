@@ -20,6 +20,20 @@
 
 ## 🚀 Get Started
 
+### Install the app (recommended)
+
+Grab the installer from [the latest release](https://github.com/zophiezlan/sticker/releases/latest) — or install with [winget](https://learn.microsoft.com/windows/package-manager/):
+
+```powershell
+winget install Zophie.Sticker
+```
+
+It's a per-user install (no admin needed) and adds **"Open as sticker"** to your right-click menu automatically.
+
+> ⚠️ **"Windows protected your PC"?** Sticker isn't code-signed yet — it's a solo project and signing certificates are pricey. Windows **SmartScreen** warns on _any_ new unsigned app regardless of what it does, so this is expected and harmless. Click **More info → Run anyway**. Every release is built in the open by [GitHub Actions](https://github.com/zophiezlan/sticker/actions) straight from this source, so you can verify exactly what's in it — and the prompt fades as more people install. (This is a reputation prompt, not a virus warning; Windows Defender is happy with it.)
+
+### Build from source
+
 **You'll need:** Windows 11 • [.NET 10 SDK](https://dotnet.microsoft.com/download) • Developer Mode turned on (Settings → System → For developers)
 
 Then just run:
