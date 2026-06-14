@@ -22,12 +22,62 @@ public partial class App : Application
     private static bool _suppressSave;
 
     private readonly Dictionary<string, Matting> _mattings = new();
+
+    // Warm sessions make back-to-back mattes fast, but a kept-warm session pins
+    // its model + intra-op thread pool (and, for heavy models, a DirectML arena
+    // that never shrinks) for as long as it lives. So after this long with no
+    // matting activity, drop every warm session — the next matte just reloads.
+    // Tunable via STICKER_SESSION_IDLE_SECS (0 keeps sessions warm forever).
+    private static readonly TimeSpan IdleEvictAfter = ResolveIdleEvict();
+    private System.Threading.Timer? _idleEvict;
+    private int _matteInFlight;
+
+    private static TimeSpan ResolveIdleEvict()
+    {
+        if (int.TryParse(Environment.GetEnvironmentVariable("STICKER_SESSION_IDLE_SECS"), out int s))
+            return s <= 0 ? Timeout.InfiniteTimeSpan : TimeSpan.FromSeconds(s);
+        return TimeSpan.FromMinutes(3);
+    }
+
+    /// <summary>Restart the idle clock after a matte; when it elapses, warm sessions are freed.</summary>
+    private void BumpIdleTimer() =>
+        _idleEvict?.Change(IdleEvictAfter, Timeout.InfiniteTimeSpan);
+
+    /// <summary>
+    /// Dispose every warm session. Fires on the idle timer (background thread) and on
+    /// exit. If a matte is still running — a CPU birefnet pass can take minutes — skip
+    /// and re-arm rather than dispose a session mid-Run, which would crash.
+    /// </summary>
+    private void DisposeWarmSessions(bool fromTimer = false)
+    {
+        if (fromTimer && Volatile.Read(ref _matteInFlight) > 0)
+        {
+            BumpIdleTimer();
+            return;
+        }
+        lock (_mattings)
+        {
+            foreach (var m in _mattings.Values)
+                m.Dispose();
+            _mattings.Clear();
+        }
+    }
+
     private WinForms.NotifyIcon? _tray;
     private string _model =
         Environment.GetEnvironmentVariable("STICKER_MODEL") ?? Matting.DefaultModel;
 
     private static string MattingKey(string model, bool forceCpu) =>
         forceCpu ? model + "|cpu" : model;
+
+    /// <summary>
+    /// Heavy models (BiRefNet) run at 1024² and commit gigabytes; on DirectML the
+    /// allocator's arena only grows and is never returned to the OS while the
+    /// session lives. So heavy sessions are dropped as soon as a run finishes
+    /// rather than kept warm — the light models (~180 MB) stay warm as before.
+    /// </summary>
+    private static bool IsHeavyModel(string model) =>
+        model.StartsWith("birefnet", StringComparison.OrdinalIgnoreCase);
 
     private Matting GetMatting(string model, bool forceCpu = false)
     {
@@ -37,7 +87,21 @@ public partial class App : Application
         lock (_mattings)
         {
             if (!_mattings.TryGetValue(key, out var m))
+            {
+                // Cap warm GPU sessions at one. Stacking warm GPU sessions is what
+                // drove runaway commit (each holds its model weights + a DirectML
+                // arena that never shrinks), so before standing up a new GPU
+                // session, dispose any other warm GPU sessions. CPU sessions (plain
+                // RAM, used only for the VRAM fallback) are left untouched. Mattes
+                // are serialised through the UI, so a session being evicted here is
+                // not one another thread is mid-Run on.
+                if (!forceCpu)
+                    foreach (var k in _mattings.Keys.Where(k => !k.EndsWith("|cpu")).ToList())
+                        if (_mattings.Remove(k, out var old))
+                            old.Dispose();
+
                 _mattings[key] = m = new Matting(model, forceCpu);
+            }
             return m;
         }
     }
@@ -105,6 +169,11 @@ public partial class App : Application
         CreateTray();
         RegisterPasteHotkey();
 
+        // Created idle (Infinite) and armed by BumpIdleTimer() after each matte.
+        if (IdleEvictAfter != Timeout.InfiniteTimeSpan)
+            _idleEvict = new System.Threading.Timer(
+                _ => DisposeWarmSessions(fromTimer: true), null, Timeout.Infinite, Timeout.Infinite);
+
         if (paths.Count > 0 || restore)
             OpenStickers(paths, noMatte, restore);
         else
@@ -120,6 +189,8 @@ public partial class App : Application
             UnregisterHotKey(_hotkeySource.Handle, HotkeyId);
             _hotkeySource.Dispose();
         }
+        _idleEvict?.Dispose();
+        DisposeWarmSessions();
         _tray?.Dispose();
         base.OnExit(e);
     }
@@ -432,7 +503,12 @@ public partial class App : Application
                 if (!nm)
                 {
                     // Model load/download happens off the UI thread
-                    image = await Task.Run(() => GetMatting(_model).RemoveBackground(file));
+                    image = await Task.Run(() =>
+                    {
+                        Interlocked.Increment(ref _matteInFlight);
+                        try { return GetMatting(_model).RemoveBackground(file); }
+                        finally { Interlocked.Decrement(ref _matteInFlight); }
+                    });
                 }
                 notice?.Close();
                 notice = null;
@@ -449,6 +525,14 @@ public partial class App : Application
                 MessageBox.Show($"Failed to open {p}:\n{ex.Message}", "Sticker");
             }
         }
+
+        // The batch above shares one warm session so a multi-sticker restore
+        // doesn't reload the model per image; once it's done, release the heavy
+        // model's arena (light models stay warm — they're cheap).
+        if (IsHeavyModel(_model))
+            EvictMatting(_model, forceCpu: false);
+        if (needsMatting)
+            BumpIdleTimer();
 
         SaveSession();
     }
@@ -542,9 +626,16 @@ public partial class App : Application
         {
             return await Task.Run(() =>
             {
+                Interlocked.Increment(ref app._matteInFlight);
                 try
                 {
-                    return app.GetMatting(m, forceCpu).RemoveBackground(source, force);
+                    string result = app.GetMatting(m, forceCpu).RemoveBackground(source, force);
+                    // Heavy models pin gigabytes for the life of the process if kept
+                    // warm, so drop the session now that this run is done. Light
+                    // sessions stay warm but the idle clock starts ticking.
+                    if (IsHeavyModel(m))
+                        app.EvictMatting(m, forceCpu);
+                    return result;
                 }
                 catch
                 {
@@ -553,6 +644,11 @@ public partial class App : Application
                     // so the UI can still surface the error / offer a CPU retry.
                     app.EvictMatting(m, forceCpu);
                     throw;
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref app._matteInFlight);
+                    app.BumpIdleTimer();   // (re)start the idle clock once work settles
                 }
             });
         }
