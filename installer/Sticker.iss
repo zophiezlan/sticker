@@ -8,7 +8,7 @@
 ;   ISCC /DAppVersion=1.2.3 /DPublishDir=..\path\to\publish installer\Sticker.iss
 
 #ifndef AppVersion
-  #define AppVersion "1.0.0"
+  #define AppVersion "1.0.3"
 #endif
 #ifndef PublishDir
   #define PublishDir "..\StickerApp\bin\Release\net10.0-windows\win-x64\publish"
@@ -54,10 +54,28 @@ Name: "{autoprograms}\Sticker"; Filename: "{app}\Sticker.exe"
 Name: "{userstartup}\Sticker"; Filename: "{app}\Sticker.exe"; Parameters: "--resume"; Tasks: startup
 
 [Registry]
-; Classic context menu: right-click any image -> (Show more options on Win11) -> Open as sticker
-Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\image\shell\OpenAsSticker"; ValueType: string; ValueData: "Open as sticker"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\image\shell\OpenAsSticker"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\Sticker.exe"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\image\shell\OpenAsSticker\command"; ValueType: string; ValueData: """{app}\Sticker.exe"" ""%1"""; Flags: uninsdeletekey
+; Classic context menu: right-click an image -> (Show more options on Win11) -> Open as sticker.
+; Registered per file extension rather than under the "image" PerceivedType, because
+; PerceivedType is set inconsistently (e.g. .webp usually lacks it), which made the
+; entry appear for .jpg only. Keep this list in sync with App.IsImageFile.
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.jpg\shell\OpenAsSticker"; ValueType: string; ValueData: "Open as sticker"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.jpg\shell\OpenAsSticker"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\Sticker.exe"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.jpg\shell\OpenAsSticker\command"; ValueType: string; ValueData: """{app}\Sticker.exe"" ""%1"""; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.jpeg\shell\OpenAsSticker"; ValueType: string; ValueData: "Open as sticker"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.jpeg\shell\OpenAsSticker"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\Sticker.exe"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.jpeg\shell\OpenAsSticker\command"; ValueType: string; ValueData: """{app}\Sticker.exe"" ""%1"""; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.png\shell\OpenAsSticker"; ValueType: string; ValueData: "Open as sticker"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.png\shell\OpenAsSticker"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\Sticker.exe"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.png\shell\OpenAsSticker\command"; ValueType: string; ValueData: """{app}\Sticker.exe"" ""%1"""; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.webp\shell\OpenAsSticker"; ValueType: string; ValueData: "Open as sticker"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.webp\shell\OpenAsSticker"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\Sticker.exe"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.webp\shell\OpenAsSticker\command"; ValueType: string; ValueData: """{app}\Sticker.exe"" ""%1"""; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.bmp\shell\OpenAsSticker"; ValueType: string; ValueData: "Open as sticker"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.bmp\shell\OpenAsSticker"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\Sticker.exe"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.bmp\shell\OpenAsSticker\command"; ValueType: string; ValueData: """{app}\Sticker.exe"" ""%1"""; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.gif\shell\OpenAsSticker"; ValueType: string; ValueData: "Open as sticker"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.gif\shell\OpenAsSticker"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\Sticker.exe"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.gif\shell\OpenAsSticker\command"; ValueType: string; ValueData: """{app}\Sticker.exe"" ""%1"""; Flags: uninsdeletekey
 
 [Run]
 Filename: "{app}\Sticker.exe"; Description: "Launch Sticker (parks in the tray)"; Flags: postinstall nowait skipifsilent

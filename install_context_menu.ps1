@@ -10,15 +10,24 @@ param(
     [string]$Exe
 )
 
-$key = "HKCU:\Software\Classes\SystemFileAssociations\image\shell\OpenAsSticker"
+# Register per-extension rather than under the "image" PerceivedType. PerceivedType
+# is set inconsistently (e.g. .webp often lacks it, so the entry only showed for
+# .jpg), so a per-extension verb is the reliable way to cover every type the app
+# actually opens. Keep this list in sync with App.IsImageFile in StickerApp.
+$extensions = @(".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif")
+$keys = $extensions | ForEach-Object {
+    "HKCU:\Software\Classes\SystemFileAssociations\$_\shell\OpenAsSticker"
+}
 
 if ($Uninstall) {
-    if (Test-Path $key) {
-        Remove-Item $key -Recurse -Force
-        Write-Host "Removed 'Open as sticker' context menu entry."
-    } else {
-        Write-Host "Nothing to remove."
+    $removed = 0
+    foreach ($k in $keys) {
+        if (Test-Path $k) { Remove-Item $k -Recurse -Force; $removed++ }
     }
+    # Also clean up the old single "image" PerceivedType key from prior versions.
+    $legacy = "HKCU:\Software\Classes\SystemFileAssociations\image\shell\OpenAsSticker"
+    if (Test-Path $legacy) { Remove-Item $legacy -Recurse -Force; $removed++ }
+    Write-Host (($removed -gt 0) ? "Removed 'Open as sticker' from $removed location(s)." : "Nothing to remove.")
     exit 0
 }
 
@@ -63,10 +72,17 @@ if (-not $cmd) {
     $icon = $python
 }
 
-New-Item -Path "$key\command" -Force | Out-Null
-Set-ItemProperty -Path $key -Name "(default)" -Value "Open as sticker"
-Set-ItemProperty -Path $key -Name "Icon" -Value $icon
-Set-ItemProperty -Path "$key\command" -Name "(default)" -Value $cmd
+# Drop the legacy single "image" key so we don't get a duplicate menu entry on
+# types that *do* have PerceivedType=image (e.g. .jpg would otherwise show twice).
+$legacy = "HKCU:\Software\Classes\SystemFileAssociations\image\shell\OpenAsSticker"
+if (Test-Path $legacy) { Remove-Item $legacy -Recurse -Force }
 
-Write-Host "Installed. Right-click any image -> Show more options -> Open as sticker."
+foreach ($key in $keys) {
+    New-Item -Path "$key\command" -Force | Out-Null
+    Set-ItemProperty -Path $key -Name "(default)" -Value "Open as sticker"
+    Set-ItemProperty -Path $key -Name "Icon" -Value $icon
+    Set-ItemProperty -Path "$key\command" -Name "(default)" -Value $cmd
+}
+
+Write-Host "Installed for: $($extensions -join ', '). Right-click an image -> Show more options -> Open as sticker."
 Write-Host "Command: $cmd"
