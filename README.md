@@ -24,7 +24,9 @@
 
 Grab the installer from [the latest release](https://github.com/zophiezlan/sticker/releases/latest).
 
-It's a per-user install (no admin needed) and adds **"Open as sticker"** to your right-click menu automatically.
+It's a per-user install (no admin needed) and adds **"Open as sticker"** to your right-click menu automatically — under **"Show more options"** on Windows 11.
+
+> 🪟 **Why "Show more options" and not the top-level menu?** Putting an entry in the Win11 top-level menu requires a *signed* app package (MSIX). Sticker isn't code-signed yet, so the installer registers the older "classic" menu verb instead — which Win11 tucks under "Show more options". It works identically, just one extra click. If you want the top-level entry, [build from source](#build-from-source) with `setup_modern_menu.ps1` (it registers an unsigned package, which needs Developer Mode). See [Context menu placement](#context-menu-placement) for the full story.
 
 > 📦 **winget — coming soon.** The package is working its way into the official winget repo via [microsoft/winget-pkgs#387213](https://github.com/microsoft/winget-pkgs/pull/387213) (in progress). Once that PR merges, you'll be able to install with:
 >
@@ -36,7 +38,7 @@ It's a per-user install (no admin needed) and adds **"Open as sticker"** to your
 
 > ⚠️ **"Windows protected your PC"?** Sticker isn't code-signed yet — it's a solo project and signing certificates are pricey. Windows **SmartScreen** warns on _any_ new unsigned app regardless of what it does, so this is expected and harmless. Click **More info → Run anyway**. Every release is built in the open by [GitHub Actions](https://github.com/zophiezlan/sticker/actions) straight from this source, so you can verify exactly what's in it — and the prompt fades as more people install. (This is a reputation prompt, not a virus warning; Windows Defender is happy with it.)
 
-### Build from source
+<a name="build-from-source"></a>### Build from source
 
 **You'll need:** Windows 11 • [.NET 10 SDK](https://dotnet.microsoft.com/download) • Developer Mode turned on (Settings → System → For developers)
 
@@ -139,11 +141,33 @@ sticker/
 | **NU1100 on first build**             | Your SDK is missing the NuGet feed. Run: `dotnet nuget add source https://api.nuget.org/v3/index.json -n nuget.org` |
 | **Package registration fails**        | Developer Mode is off. Turn it on in Settings → System → For developers.                                            |
 | **Menu entry does nothing**           | Set env var `STICKER_SHELL_LOG=1`, restart Explorer, try again, then check `%TEMP%\sticker-shell.log`               |
+| **No top-level entry, only "Show more options"** | Expected for the `.exe`/winget install — see [Context menu placement](#context-menu-placement) below                |
 | **Menu entry vanished after rebuild** | Re-run `.\setup_modern_menu.ps1` — the registration points at `publish\`, so don't move that folder                 |
 | **Stickers die when terminal closes** | Don't use `dotnet run` — use the published exe (or launch via the context menu)                                     |
 | **Model download stalls / corrupt**   | Delete the offending `.onnx` in `%USERPROFILE%\.u2net` and re-create a sticker to re-download                       |
 | **Cutout looks stale after re-matte** | Clear the matte cache: delete `%USERPROFILE%\.sticker_cache` (the per-model cached results live here)               |
 | **"Start with Windows" won't stick**  | Check the shortcut exists — see [autostart](#autostart) below                                                       |
+
+<a name="context-menu-placement"></a>### Context menu placement (top-level vs. "Show more options")
+
+Sticker can install its right-click entry two different ways, and which one you get depends on how you installed:
+
+| Install method                              | Where "Open as sticker" appears        | How it's registered                                  |
+| ------------------------------------------- | -------------------------------------- | ---------------------------------------------------- |
+| **`.exe` installer / winget**               | Under **"Show more options"** (classic) | A plain `HKCU` registry verb                          |
+| **`setup_modern_menu.ps1`** (build from source) | **Top-level** Win11 menu                | An unsigned sparse app package (needs Developer Mode) |
+| **`install_context_menu.ps1`** (classic fallback) | Under **"Show more options"** (classic) | A plain `HKCU` registry verb                          |
+
+**Why the difference?** Windows 11 only lets an entry into the *top-level* context menu if it comes from an app package that implements `IExplorerCommand` (Microsoft deliberately closed the top-level menu to the old registry verbs to stop the Win10 clutter). That package has to be **code-signed** to install normally — an *unsigned* package only registers via `Add-AppxPackage -Register` with **Developer Mode** on, which is a developer convenience, not something you can ship to end users.
+
+Sticker isn't code-signed yet (solo project, certs are pricey), so:
+
+- The shippable installers (the `.exe`, and winget once [#387213](https://github.com/microsoft/winget-pkgs/pull/387213) merges) fall back to the **classic** registry verb → lands under "Show more options". Installs cleanly for everyone, no Developer Mode needed.
+- The **top-level** menu currently only works via `setup_modern_menu.ps1`, which registers the unsigned package locally and therefore needs Developer Mode.
+
+This is a limitation of *not being signed*, not a deliberate choice — both menus launch the exact same app. If/when Sticker ships a signed MSIX (e.g. via the Microsoft Store, which signs packages for you), the top-level menu can be the default everywhere.
+
+If you've installed the `.exe` and want the top-level entry too, you can run `setup_modern_menu.ps1` alongside it; the two registrations are independent (you'd then see both entries until you remove one).
 
 ### Where Sticker keeps its files
 
