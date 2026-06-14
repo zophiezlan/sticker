@@ -10,6 +10,9 @@
     <AssemblyName>Sticker</AssemblyName>
     <RootNamespace>StickerApp</RootNamespace>
     <ApplicationIcon>app.ico</ApplicationIcon>
+    <!-- Declares Per-Monitor-V2 DPI awareness (see app.manifest) so stickers stay
+         crisp and hit-test correctly when dragged across mixed-DPI monitors. -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
     <!-- Precompile to native code on publish: snappier cold start -->
     <PublishReadyToRun>true</PublishReadyToRun>
     <Version>1.0.3</Version>
@@ -18,6 +21,11 @@
     <Copyright>© 2026 Zophie</Copyright>
     <!-- Allows compile-checking on non-Windows CI; harmless on Windows -->
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <!-- WPF-first app: DPI awareness is declared in app.manifest (which WPF
+         honors and the WinForms tray inherits from the process). WFO0003 assumes
+         a WinForms-bootstrapped app calling SetHighDpiMode/ApplicationConfiguration
+         .Initialize() — which we don't — so its advice doesn't apply here. -->
+    <NoWarn>$(NoWarn);WFO0003</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
