@@ -26,13 +26,54 @@ public partial class App : Application
     private string _model =
         Environment.GetEnvironmentVariable("STICKER_MODEL") ?? Matting.DefaultModel;
 
-    private Matting GetMatting(string model)
+    private static string MattingKey(string model, bool forceCpu) =>
+        forceCpu ? model + "|cpu" : model;
+
+    private Matting GetMatting(string model, bool forceCpu = false)
+    {
+        // CPU and GPU sessions for the same model are cached separately so a
+        // VRAM-driven CPU fallback doesn't evict the working GPU session.
+        string key = MattingKey(model, forceCpu);
+        lock (_mattings)
+        {
+            if (!_mattings.TryGetValue(key, out var m))
+                _mattings[key] = m = new Matting(model, forceCpu);
+            return m;
+        }
+    }
+
+    /// <summary>
+    /// Drop a session and release its resources. A run that fails part-way
+    /// (e.g. a heavy model OOM-ing on the GPU) leaves the ONNX Runtime session
+    /// holding its weights and allocator arena — on DirectML that's reserved
+    /// VRAM that never comes back while the session lives, which then starves
+    /// *other* models' re-mattes. Evicting the failed session frees it so the
+    /// next attempt — even of a different, lighter model — starts clean.
+    /// </summary>
+    private void EvictMatting(string model, bool forceCpu)
     {
         lock (_mattings)
         {
-            if (!_mattings.TryGetValue(model, out var m))
-                _mattings[model] = m = new Matting(model);
-            return m;
+            if (_mattings.Remove(MattingKey(model, forceCpu), out var m))
+                m.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Dispose all warm GPU sessions, freeing their VRAM. Kept-warm sessions make
+    /// switching models fast, but they accumulate — a heavy model (BiRefNet) can
+    /// then fail to even *load* onto the GPU because the lighter ones are still
+    /// resident. Called as a last resort before a CPU fallback so the heavy model
+    /// gets a clean GPU to itself. CPU sessions (RAM, not VRAM) are left alone.
+    /// </summary>
+    public static void TrimGpuSessions()
+    {
+        var app = (App)Current;
+        lock (app._mattings)
+        {
+            foreach (var key in app._mattings.Keys.Where(k => !k.EndsWith("|cpu")).ToList())
+                if (app._mattings.Remove(key, out var m))
+                    m.Dispose();
         }
     }
 
@@ -150,10 +191,25 @@ public partial class App : Application
                 return;
             }
         }
-        catch
+        catch (COMException)
         {
-            // Clipboard is flaky by nature; fall through to the balloon.
+            // The clipboard is a shared, singly-owned resource; another app
+            // holding it open makes reads fail transiently. That's not "no
+            // image" — tell the user to retry rather than implying it's empty.
+            _tray?.ShowBalloonTip(3000, "Sticker",
+                "Couldn't read the clipboard — another app may be using it. Try again in a moment.",
+                WinForms.ToolTipIcon.Warning);
+            return;
         }
+        catch (Exception ex)
+        {
+            _tray?.ShowBalloonTip(3000, "Sticker",
+                $"Couldn't paste from the clipboard: {ex.Message}",
+                WinForms.ToolTipIcon.Warning);
+            return;
+        }
+        // No exception and nothing usable found — the clipboard really is empty
+        // (of images), so this message is now accurate.
         _tray?.ShowBalloonTip(2000, "Sticker", "No image on the clipboard.",
             WinForms.ToolTipIcon.Info);
     }
@@ -261,6 +317,7 @@ public partial class App : Application
                 w.SetPinned(false);
         });
         menu.Items.Add("Close all stickers", null, (_, _) => CloseAll());
+        menu.Items.Add("Clear matte cache…", null, (_, _) => ClearMatteCache());
         menu.Items.Add(new WinForms.ToolStripSeparator());
 
         var startup = new WinForms.ToolStripMenuItem("Start with Windows")
@@ -285,6 +342,18 @@ public partial class App : Application
             ContextMenuStrip = menu,
         };
         _tray.DoubleClick += (_, _) => PickAndOpen();
+    }
+
+    private void ClearMatteCache()
+    {
+        var (files, bytes) = Matting.ClearMatteCache();
+        string freed = bytes >= (1L << 20) ? $"{bytes >> 20} MB" : $"{(bytes + 1023) >> 10} KB";
+        _tray?.ShowBalloonTip(3000, "Sticker",
+            files == 0
+                ? "Matte cache is already empty."
+                : $"Cleared {files} cached cutout(s), freeing {freed}. Open stickers are unaffected; "
+                  + "models stay downloaded.",
+            WinForms.ToolTipIcon.Info);
     }
 
     private sealed class DarkColorTable : WinForms.ProfessionalColorTable
@@ -347,24 +416,7 @@ public partial class App : Application
         Window? notice = null;
         bool needsMatting = jobs.Any(j => !j.NoMatte);
         if (needsMatting && !Matting.ModelFileExists(_model))
-        {
-            notice = new Window
-            {
-                Title = "Sticker",
-                Width = 420,
-                Height = 100,
-                WindowStartupLocation = WindowStartupLocation.CenterScreen,
-                ResizeMode = ResizeMode.NoResize,
-                Topmost = true,
-                Content = new TextBlock
-                {
-                    Text = $"Downloading matting model '{_model}'… first run only.",
-                    Margin = new Thickness(16),
-                    TextWrapping = TextWrapping.Wrap,
-                },
-            };
-            notice.Show();
-        }
+            notice = ShowDownloadNotice(_model);
 
         foreach (var (p, nm, state) in jobs)
         {
@@ -401,16 +453,113 @@ public partial class App : Application
         SaveSession();
     }
 
-    /// <summary>Re-run background removal, bypassing the cache, optionally with a different model.</summary>
-    public static Task<string> RematteAsync(string source, string? model = null)
+    /// <summary>The matting model new stickers use by default (STICKER_MODEL or the built-in default).</summary>
+    public static string ActiveModel => ((App)Current)._model;
+
+    /// <summary>Rough on-disk size of a model, for download notices.</summary>
+    private static int ModelSizeMb(string model) => model.StartsWith("birefnet") ? 900 : 180;
+
+    /// <summary>
+    /// A small centred "downloading…" window. Models download lazily on first use,
+    /// which can stall the matte for a while (BiRefNet is ~900 MB) — without this,
+    /// a first-time model switch would just spin with no explanation. Returns the
+    /// window so the caller can close it once the matte finishes.
+    /// </summary>
+    private Window ShowDownloadNotice(string model)
+    {
+        var text = new TextBlock
+        {
+            Text = $"Downloading the '{model}' model (~{ModelSizeMb(model)} MB) — first use only.",
+            TextWrapping = TextWrapping.Wrap,
+        };
+        var bar = new ProgressBar
+        {
+            Height = 18,
+            Minimum = 0,
+            Maximum = 1,
+            IsIndeterminate = true,   // until the first progress tick gives us a total
+            Margin = new Thickness(0, 12, 0, 0),
+        };
+        var notice = new Window
+        {
+            Title = "Sticker",
+            Width = 460,
+            Height = 150,
+            WindowStartupLocation = WindowStartupLocation.CenterScreen,
+            ResizeMode = ResizeMode.NoResize,
+            Topmost = true,
+            Content = new StackPanel { Margin = new Thickness(16), Children = { text, bar } },
+        };
+
+        // Live progress. DownloadProgress fires on the download thread, so marshal
+        // to the UI. Throttle to whole-percent (or 2 MB when length is unknown)
+        // changes so we don't flood the dispatcher with ~11k updates for BiRefNet.
+        int lastMarker = -1;
+        void OnProgress(string m, long read, long? total)
+        {
+            if (m != model) return;
+            int marker = total is > 0 ? (int)(read * 100 / total.Value) : (int)(read >> 21);
+            if (marker == lastMarker) return;
+            lastMarker = marker;
+            notice.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (total is > 0)
+                {
+                    bar.IsIndeterminate = false;
+                    bar.Value = (double)read / total.Value;
+                    text.Text = $"Downloading '{model}' — {read >> 20} / {total.Value >> 20} MB ({marker}%)";
+                }
+                else
+                {
+                    text.Text = $"Downloading '{model}' — {read >> 20} MB";
+                }
+            }));
+        }
+        Matting.DownloadProgress += OnProgress;
+        notice.Closed += (_, _) => Matting.DownloadProgress -= OnProgress;
+        notice.Show();
+        return notice;
+    }
+
+    /// <summary>Produce the matte for <paramref name="source"/>, optionally with a different model.</summary>
+    /// <param name="force">Re-run inference even if a cached result for this model exists.
+    /// When false (the default), an already-computed model loads instantly from cache.</param>
+    /// <param name="forceCpu">Run on CPU instead of the GPU — slow, but survives VRAM shortages.</param>
+    public static async Task<string> RematteAsync(string source, string? model = null,
+                                                  bool forceCpu = false, bool force = false)
     {
         var app = (App)Current;
         string m = model ?? app._model;
-        if (!Matting.ModelFileExists(m))
-            app._tray?.ShowBalloonTip(4000, "Sticker",
-                $"Downloading model '{m}' — first use can take a while (BiRefNet is ~900 MB).",
+
+        // Visible notice if this model still needs downloading (matches first-open UX).
+        Window? notice = Matting.ModelFileExists(m) ? null : app.ShowDownloadNotice(m);
+        if (forceCpu)
+            app._tray?.ShowBalloonTip(6000, "Sticker",
+                "Re-matting on the CPU — this can take a while. The app is still working, "
+                + "give it a minute or two before assuming it's stuck.",
                 WinForms.ToolTipIcon.Info);
-        return Task.Run(() => app.GetMatting(m).RemoveBackground(source, force: true));
+        try
+        {
+            return await Task.Run(() =>
+            {
+                try
+                {
+                    return app.GetMatting(m, forceCpu).RemoveBackground(source, force);
+                }
+                catch
+                {
+                    // Don't let a failed session squat on VRAM/RAM and poison the
+                    // next re-matte (even of another model). Drop it, then rethrow
+                    // so the UI can still surface the error / offer a CPU retry.
+                    app.EvictMatting(m, forceCpu);
+                    throw;
+                }
+            });
+        }
+        finally
+        {
+            notice?.Close();
+        }
     }
 
     public static void SaveSession()
