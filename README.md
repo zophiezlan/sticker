@@ -88,6 +88,7 @@ Sticker lives in your system tray with quick access to:
 - **Paste as sticker** (`Ctrl+Alt+V`) — screenshot something, hit the hotkey, instant sticker
 - **Open images…** — pick files manually
 - **Restore last session** — bring back all your stickers from last time
+- **Clear matte cache…** — free up disk by deleting cached cutouts (open stickers and downloaded models are untouched)
 - **Start with Windows** — your stickers are always there when you log in
 
 ### Command Line
@@ -103,7 +104,7 @@ Sticker.exe --model birefnet-general img.jpg
 
 ## 🧠 AI Models
 
-Not every background removal is perfect on the first try — so Sticker ships with three models you can swap between instantly (right-click → "Re-matte"):
+Not every background removal is perfect on the first try — so Sticker ships with three models you can swap between from the right-click menu (**"Matte with"**):
 
 | Model               | Best for             | Speed     | Size    |
 | ------------------- | -------------------- | --------- | ------- |
@@ -111,7 +112,14 @@ Not every background removal is perfect on the first try — so Sticker ships wi
 | `u2net_human_seg`   | People & portraits   | ⚡ Fast   | ~180 MB |
 | `birefnet-general`  | Maximum quality      | 🐢 Slower | ~900 MB |
 
-Each model's result is cached separately — switching between them is instant after the first run. Set a different default with `--model` or the `STICKER_MODEL` environment variable.
+Each model's result is cached separately (`~/.sticker_cache`, keyed by image + model). **Switching to a model you've already run loads instantly from that cache** — no re-inference; a model you haven't tried yet runs once, then it's cached too. If you ever want a genuinely fresh pass, use **"Re-process current (ignore cache)."** Set a different default model with `--model` or the `STICKER_MODEL` environment variable.
+
+> 🐢 **BiRefNet is heavy.** It runs at 1024×1024 through a transformer backbone, so peak memory is several GB and it's much slower than the others. Two things can make it fail with an ONNX Runtime "out of memory" / "Failed to allocate" error even on a capable card:
+>
+> 1. **DirectML is selecting the wrong GPU.** This is the most common cause on machines with switchable graphics — see [GPU selection](#gpu-selection-hybrid-graphics) in Troubleshooting. Fix that first; it's usually the whole problem.
+> 2. **DirectML genuinely overflows VRAM.** DML's memory planning is less efficient than CUDA, so BiRefNet can need more than its nominal footprint. If you've confirmed the right GPU and it still won't fit, you can shrink the input resolution with `STICKER_BIREFNET_SIZE=768` (or `512`) to trade some edge detail for a smaller footprint, or accept the **retry-on-CPU** prompt (same result, just slower). `STICKER_FORCE_CPU=1` always skips the GPU.
+>
+> The lighter `isnet`/`u2net` models run at 320–1024 px and rarely hit any of this.
 
 ---
 
@@ -145,7 +153,10 @@ sticker/
 | **Menu entry vanished after rebuild** | Re-run `.\setup_modern_menu.ps1` — the registration points at `publish\`, so don't move that folder                 |
 | **Stickers die when terminal closes** | Don't use `dotnet run` — use the published exe (or launch via the context menu)                                     |
 | **Model download stalls / corrupt**   | Delete the offending `.onnx` in `%USERPROFILE%\.u2net` and re-create a sticker to re-download                       |
-| **Cutout looks stale after re-matte** | Clear the matte cache: delete `%USERPROFILE%\.sticker_cache` (the per-model cached results live here)               |
+| **Cutout looks stale after re-matte** | Use the tray's **"Clear matte cache…"** (deletes only cached cutouts, keeps your session + models). Or use **"Re-process current (ignore cache)"** on the sticker itself. |
+| **Menu only shows for some image types** | Old versions registered the classic menu under the `image` PerceivedType, which `.webp` (and others) often lack. Re-run `install_context_menu.ps1` / reinstall — it now registers per-extension (`.jpg .jpeg .png .webp .bmp .gif`). |
+| **BiRefNet "out of memory" / "Failed to allocate"** | Usually DirectML on the **wrong GPU** — see [GPU selection](#gpu-selection-hybrid-graphics). If the right GPU still won't fit: `STICKER_BIREFNET_SIZE=768`, take the **CPU retry** prompt, or `STICKER_FORCE_CPU=1`. |
+| **Heavy model fails, then lighter models fail too** | Fixed in current builds — a failed session used to hold its VRAM. Update; if on an old build, restart Sticker to clear it.            |
 | **"Start with Windows" won't stick**  | Check the shortcut exists — see [autostart](#autostart) below                                                       |
 
 <a name="context-menu-placement"></a>### Context menu placement (top-level vs. "Show more options")
@@ -169,6 +180,41 @@ This is a limitation of *not being signed*, not a deliberate choice — both men
 
 If you've installed the `.exe` and want the top-level entry too, you can run `setup_modern_menu.ps1` alongside it; the two registrations are independent (you'd then see both entries until you remove one).
 
+<a name="gpu-selection-hybrid-graphics"></a>### GPU selection (hybrid graphics)
+
+Sticker **auto-selects the highest-VRAM adapter** for DirectML, so hybrid-graphics machines should use the discrete GPU without any setup. (Earlier builds blindly used DXGI adapter 0 — and *whichever GPU drives your primary display is normally adapter 0* — so on switchable-graphics systems they'd land on a low-memory integrated GPU and heavy models would OOM while the real card sat idle. That's now handled automatically.)
+
+If a heavy model still fails with "out of memory" while your GPU clearly has free VRAM, the auto-pick may have chosen wrong — here's how to take control:
+
+**Force a specific adapter** with `STICKER_DML_DEVICE` (the DXGI adapter index). Find the index of the GPU you want and set it explicitly — try `1` if `0` is the iGPU:
+
+```powershell
+[Environment]::SetEnvironmentVariable('STICKER_DML_DEVICE','1','User')
+```
+
+Then fully quit Sticker from the tray and relaunch. If `1` is also wrong, try `2`, etc. To clear it: set the value to `$null`.
+
+To check what you're working with, see your adapters and their dedicated VRAM:
+
+```powershell
+Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\*' -EA SilentlyContinue |
+  Where-Object { $_.'HardwareInformation.qwMemorySize' } |
+  ForEach-Object { '{0} — {1:N0} GB' -f $_.DriverDesc, ($_.'HardwareInformation.qwMemorySize'/1GB) }
+```
+
+> Note the adapter index can change when your display setup changes. For example, after moving a monitor onto the dGPU, the dGPU becomes adapter 0 — so a previously-needed `STICKER_DML_DEVICE=1` would then point *back* at the iGPU. Clear the variable once the dGPU is your primary display.
+
+### Environment variables
+
+| Variable               | Effect                                                                                          |
+| ---------------------- | ----------------------------------------------------------------------------------------------- |
+| `STICKER_MODEL`        | Default matting model for new stickers (e.g. `birefnet-general`). Same as `--model`.            |
+| `STICKER_DML_DEVICE`   | **Override** the auto-selected DirectML adapter (DXGI index). Normally unnecessary — Sticker picks the highest-VRAM GPU automatically. |
+| `STICKER_FORCE_CPU`    | `1` = skip the GPU entirely and run matting on the CPU (slow, but unlimited memory).            |
+| `STICKER_BIREFNET_SIZE`| BiRefNet input resolution (e.g. `768`, `512`); lower = less memory, less edge detail. Default 1024. |
+| `U2NET_HOME`           | Override the model download folder (default `%USERPROFILE%\.u2net`).                            |
+| `STICKER_SHELL_LOG`    | `1` = write Explorer context-menu diagnostics to `%TEMP%\sticker-shell.log`.                    |
+
 ### Where Sticker keeps its files
 
 Everything is per-user, under your profile folder — nothing is written to `Program Files` or `HKLM`. Paste these straight into Explorer's address bar:
@@ -176,8 +222,8 @@ Everything is per-user, under your profile folder — nothing is written to `Pro
 | What                  | Location                                  | Notes                                                              |
 | --------------------- | ----------------------------------------- | ------------------------------------------------------------------ |
 | **AI models**         | `%USERPROFILE%\.u2net`                    | One `.onnx` per model. Override the folder with the `U2NET_HOME` env var. Safe to delete — re-downloads on next use. |
-| **Matte cache**       | `%USERPROFILE%\.sticker_cache`            | Cached cutouts, keyed per model. Clipboard captures land in `.sticker_cache\clipboard`. Safe to delete. |
-| **Session**           | `%USERPROFILE%\.sticker_cache\session.json` | Positions/sizes of your open stickers — what `--resume` restores. Shared with the Python prototype. |
+| **Matte cache**       | `%USERPROFILE%\.sticker_cache`            | Cached cutout PNGs, keyed per image+model. Prefer the tray's **"Clear matte cache…"** over deleting by hand — the same folder also holds your session and clipboard captures. |
+| **Session**           | `%USERPROFILE%\.sticker_cache\session.json` | Positions/sizes of your open stickers — what `--resume` restores. Shared with the Python prototype. (Don't delete the whole `.sticker_cache` folder to clear cutouts — you'd lose this.) |
 | **Shell debug log**   | `%TEMP%\sticker-shell.log`                | Only written when `STICKER_SHELL_LOG=1` is set.                    |
 
 ### Registry entries
