@@ -2,6 +2,44 @@
 
 All notable changes to Sticker are documented here.
 
+## [1.0.4] — 2026-06-14
+
+### Added
+
+- **Model-download integrity.** Each downloaded model is verified against a
+  pinned SHA-256 before it's installed, so a corrupted or substituted file is
+  rejected and re-fetched instead of being loaded into the runtime.
+- **Per-monitor DPI awareness (Per-Monitor V2).** Stickers stay sharp and
+  hit-test correctly when dragged across monitors with different display
+  scaling, instead of being bitmap-stretched.
+- **Stickers remember their model across a restore.** A restored sticker comes
+  back with the model it was matted with when that cutout is still cached
+  (instant); otherwise it falls back to the default model, so `--resume` never
+  kicks off a slow re-matte at login.
+
+### Fixed
+
+- **Matte no longer races session teardown.** All matting is serialized through
+  one gate, so switching models, trimming GPU memory, or evicting an idle
+  session can no longer dispose an ONNX session mid-inference (which could crash
+  the app). Model load/download also no longer holds the session lock, so
+  quitting during a first-run download won't hang.
+- **Single-instance pipe is isolated per session**, with a current-user-only
+  ACL and a backoff on the listener — a second login session on the same machine
+  can no longer collide with it or spin the CPU.
+- **Clipboard captures are pruned** instead of piling up forever under
+  `~/.sticker_cache/clipboard`.
+- **Session writes are debounced** off the UI thread, so rapid resize/opacity
+  changes no longer rewrite `session.json` on every notch; the session is
+  flushed synchronously on exit.
+- **Crash resilience.** A stray UI-thread exception is now surfaced and survived
+  instead of taking down the tray and every open sticker; a fatal background
+  error still flushes the session first so nothing is lost.
+- **Rotate menu labels** no longer advertise `R` / `Shift+R` next to the 90°
+  items (those keys rotate 15°, the menu items 90°).
+- **"Close all stickers" can't get stuck** suppressing session saves if a window
+  throws while closing.
+
 ## [1.0.3] — 2026-06-14
 
 ### Added

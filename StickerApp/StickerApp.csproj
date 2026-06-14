@@ -15,7 +15,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <!-- Precompile to native code on publish: snappier cold start -->
     <PublishReadyToRun>true</PublishReadyToRun>
-    <Version>1.0.3</Version>
+    <Version>1.0.4</Version>
     <Product>Sticker</Product>
     <Description>Floating, background-removed image cutouts for the Windows desktop.</Description>
     <Copyright>© 2026 Zophie</Copyright>

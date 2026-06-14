@@ -112,7 +112,7 @@ Not every background removal is perfect on the first try — so Sticker ships wi
 | `u2net_human_seg`   | People & portraits   | ⚡ Fast   | ~180 MB |
 | `birefnet-general`  | Maximum quality      | 🐢 Slower | ~900 MB |
 
-Each model's result is cached separately (`~/.sticker_cache`, keyed by image + model). **Switching to a model you've already run loads instantly from that cache** — no re-inference; a model you haven't tried yet runs once, then it's cached too. If you ever want a genuinely fresh pass, use **"Re-process current (ignore cache)."** Set a different default model with `--model` or the `STICKER_MODEL` environment variable.
+Each model's result is cached separately (`~/.sticker_cache`, keyed by image + model). **Switching to a model you've already run loads instantly from that cache** — no re-inference; a model you haven't tried yet runs once, then it's cached too. If you ever want a genuinely fresh pass, use **"Re-process current (ignore cache)."** Set a different default model with `--model` or the `STICKER_MODEL` environment variable. Restoring a session brings each sticker back with the model it was matted with **when that cutout is still cached**; otherwise it falls back to the default, so `--resume` never triggers a slow re-matte at login.
 
 > 🐢 **BiRefNet is heavy.** It runs at 1024×1024 through a transformer backbone, so peak memory is several GB and it's much slower than the others. Two things can make it fail with an ONNX Runtime "out of memory" / "Failed to allocate" error even on a capable card:
 >
@@ -152,7 +152,7 @@ sticker/
 | **No top-level entry, only "Show more options"** | Expected for the `.exe`/winget install — see [Context menu placement](#context-menu-placement) below                |
 | **Menu entry vanished after rebuild** | Re-run `.\setup_modern_menu.ps1` — the registration points at `publish\`, so don't move that folder                 |
 | **Stickers die when terminal closes** | Don't use `dotnet run` — use the published exe (or launch via the context menu)                                     |
-| **Model download stalls / corrupt**   | Delete the offending `.onnx` in `%USERPROFILE%\.u2net` and re-create a sticker to re-download                       |
+| **Model download stalls / corrupt**   | Delete the offending `.onnx` in `%USERPROFILE%\.u2net` and re-create a sticker to re-download (downloads are SHA-256-verified, so a corrupt file is auto-rejected) |
 | **Cutout looks stale after re-matte** | Use the tray's **"Clear matte cache…"** (deletes only cached cutouts, keeps your session + models). Or use **"Re-process current (ignore cache)"** on the sticker itself. |
 | **Menu only shows for some image types** | Old versions registered the classic menu under the `image` PerceivedType, which `.webp` (and others) often lack. Re-run `install_context_menu.ps1` / reinstall — it now registers per-extension (`.jpg .jpeg .png .webp .bmp .gif`). |
 | **BiRefNet "out of memory" / "Failed to allocate"** | Usually DirectML on the **wrong GPU** — see [GPU selection](#gpu-selection-hybrid-graphics). If the right GPU still won't fit: `STICKER_BIREFNET_SIZE=768`, take the **CPU retry** prompt, or `STICKER_FORCE_CPU=1`. |
@@ -222,7 +222,7 @@ Everything is per-user, under your profile folder — nothing is written to `Pro
 | What                  | Location                                  | Notes                                                              |
 | --------------------- | ----------------------------------------- | ------------------------------------------------------------------ |
 | **AI models**         | `%USERPROFILE%\.u2net`                    | One `.onnx` per model. Override the folder with the `U2NET_HOME` env var. Safe to delete — re-downloads on next use. |
-| **Matte cache**       | `%USERPROFILE%\.sticker_cache`            | Cached cutout PNGs, keyed per image+model. Prefer the tray's **"Clear matte cache…"** over deleting by hand — the same folder also holds your session and clipboard captures. |
+| **Matte cache**       | `%USERPROFILE%\.sticker_cache`            | Cached cutout PNGs, keyed per image+model. Prefer the tray's **"Clear matte cache…"** over deleting by hand — the same folder also holds your session and clipboard captures (the latter auto-pruned to the most recent few). |
 | **Session**           | `%USERPROFILE%\.sticker_cache\session.json` | Positions/sizes of your open stickers — what `--resume` restores. Shared with the Python prototype. (Don't delete the whole `.sticker_cache` folder to clear cutouts — you'd lose this.) |
 | **Shell debug log**   | `%TEMP%\sticker-shell.log`                | Only written when `STICKER_SHELL_LOG=1` is set.                    |
 

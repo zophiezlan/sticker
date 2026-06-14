@@ -8,7 +8,7 @@
 ;   ISCC /DAppVersion=1.2.3 /DPublishDir=..\path\to\publish installer\Sticker.iss
 
 #ifndef AppVersion
-  #define AppVersion "1.0.3"
+  #define AppVersion "1.0.4"
 #endif
 #ifndef PublishDir
   #define PublishDir "..\StickerApp\bin\Release\net10.0-windows\win-x64\publish"
