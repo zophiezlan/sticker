@@ -22,13 +22,17 @@
 
 ### Install the app (recommended)
 
-Grab the installer from [the latest release](https://github.com/zophiezlan/sticker/releases/latest) — or install with [winget](https://learn.microsoft.com/windows/package-manager/):
-
-```powershell
-winget install Zophie.Sticker
-```
+Grab the installer from [the latest release](https://github.com/zophiezlan/sticker/releases/latest).
 
 It's a per-user install (no admin needed) and adds **"Open as sticker"** to your right-click menu automatically.
+
+> 📦 **winget — coming soon.** The package is working its way into the official winget repo via [microsoft/winget-pkgs#387213](https://github.com/microsoft/winget-pkgs/pull/387213) (in progress). Once that PR merges, you'll be able to install with:
+>
+> ```powershell
+> winget install Zophie.Sticker
+> ```
+>
+> Until then, use the release installer above.
 
 > ⚠️ **"Windows protected your PC"?** Sticker isn't code-signed yet — it's a solo project and signing certificates are pricey. Windows **SmartScreen** warns on _any_ new unsigned app regardless of what it does, so this is expected and harmless. Click **More info → Run anyway**. Every release is built in the open by [GitHub Actions](https://github.com/zophiezlan/sticker/actions) straight from this source, so you can verify exactly what's in it — and the prompt fades as more people install. (This is a reputation prompt, not a virus warning; Windows Defender is happy with it.)
 
@@ -128,6 +132,8 @@ sticker/
 
 ## 🛠️ Troubleshooting
 
+### Common fixes
+
 | Problem                               | Fix                                                                                                                 |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | **NU1100 on first build**             | Your SDK is missing the NuGet feed. Run: `dotnet nuget add source https://api.nuget.org/v3/index.json -n nuget.org` |
@@ -135,6 +141,55 @@ sticker/
 | **Menu entry does nothing**           | Set env var `STICKER_SHELL_LOG=1`, restart Explorer, try again, then check `%TEMP%\sticker-shell.log`               |
 | **Menu entry vanished after rebuild** | Re-run `.\setup_modern_menu.ps1` — the registration points at `publish\`, so don't move that folder                 |
 | **Stickers die when terminal closes** | Don't use `dotnet run` — use the published exe (or launch via the context menu)                                     |
+| **Model download stalls / corrupt**   | Delete the offending `.onnx` in `%USERPROFILE%\.u2net` and re-create a sticker to re-download                       |
+| **Cutout looks stale after re-matte** | Clear the matte cache: delete `%USERPROFILE%\.sticker_cache` (the per-model cached results live here)               |
+| **"Start with Windows" won't stick**  | Check the shortcut exists — see [autostart](#autostart) below                                                       |
+
+### Where Sticker keeps its files
+
+Everything is per-user, under your profile folder — nothing is written to `Program Files` or `HKLM`. Paste these straight into Explorer's address bar:
+
+| What                  | Location                                  | Notes                                                              |
+| --------------------- | ----------------------------------------- | ------------------------------------------------------------------ |
+| **AI models**         | `%USERPROFILE%\.u2net`                    | One `.onnx` per model. Override the folder with the `U2NET_HOME` env var. Safe to delete — re-downloads on next use. |
+| **Matte cache**       | `%USERPROFILE%\.sticker_cache`            | Cached cutouts, keyed per model. Clipboard captures land in `.sticker_cache\clipboard`. Safe to delete. |
+| **Session**           | `%USERPROFILE%\.sticker_cache\session.json` | Positions/sizes of your open stickers — what `--resume` restores. Shared with the Python prototype. |
+| **Shell debug log**   | `%TEMP%\sticker-shell.log`                | Only written when `STICKER_SHELL_LOG=1` is set.                    |
+
+### Registry entries
+
+Sticker touches very little of the registry, and everything lives under **`HKEY_CURRENT_USER`** (no admin, no machine-wide keys). Open `regedit` and paste a path into its address bar to inspect.
+
+**Classic context-menu verb** (only present if you used `install_context_menu.ps1` / the classic fallback):
+
+```
+HKCU\Software\Classes\SystemFileAssociations\image\shell\OpenAsSticker
+HKCU\Software\Classes\SystemFileAssociations\image\shell\OpenAsSticker\command
+```
+
+The `\command` subkey holds the exact launch line (`"...\Sticker.exe" "%1"`) — handy for confirming the menu points at the right executable. Delete the `OpenAsSticker` key to remove the classic verb by hand.
+
+**Modern (Windows 11) context menu** is *not* a plain registry verb — it's a sparse MSIX package registering an `IExplorerCommand` COM server. So you won't find it under `shell\`. Instead:
+
+- List it: `Get-AppxPackage *Sticker*` in PowerShell
+- Remove it: `.\setup_modern_menu.ps1 -Uninstall` (or `Remove-AppxPackage <PackageFullName>`)
+- The COM registration is owned by the package and disappears with it — don't hand-edit it.
+
+<a name="autostart"></a>**Autostart** is deliberately *not* a `...\CurrentVersion\Run` key (that location is malware's favourite, so Defender scores writes to it harshly). Instead it's a plain shortcut in your Startup folder:
+
+```
+%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\Sticker.lnk
+```
+
+The shortcut launches `Sticker.exe --resume`. To toggle it: use the tray menu's **"Start with Windows"**, or just create/delete that `.lnk` yourself (type `shell:startup` in Explorer to open the folder).
+
+### Deeper diagnostics
+
+- **Right-click menu misbehaving?** Set the user env var `STICKER_SHELL_LOG=1`, restart Explorer (`taskkill /f /im explorer.exe & start explorer.exe`), reproduce, then read `%TEMP%\sticker-shell.log` — it traces each `IExplorerCommand` call.
+- **Verify the modern package is actually registered:** `Get-AppxPackage *Sticker* | Format-List Name, PackageFullName, InstallLocation`. If `InstallLocation` no longer exists (e.g. you moved/deleted `publish\`), the menu silently breaks — re-run `setup_modern_menu.ps1`.
+- **GPU vs CPU matting:** Sticker uses ONNX Runtime with DirectML and falls back to CPU automatically. If matting is unexpectedly slow, your GPU path may be falling back — check the tray app's console/output, and confirm a DX12-capable GPU and current drivers.
+- **Force a model from scratch:** delete its `.onnx` from `%USERPROFILE%\.u2net` *and* clear `%USERPROFILE%\.sticker_cache` so no stale cutouts are served.
+- **Full reset (nuke everything user-side):** uninstall the app, then delete `%USERPROFILE%\.u2net`, `%USERPROFILE%\.sticker_cache`, the `Sticker.lnk` startup shortcut, and (if you used the classic menu) the `HKCU\...\OpenAsSticker` registry key.
 
 ---
 
