@@ -10,7 +10,7 @@
 
 |                                |                                                                                                                     |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
-| 🖱️ **One click**               | Right-click any image → it's a sticker. No extra apps, no export steps.                                             |
+| 🖱️ **One click**               | Right-click any image → Open as sticker. No extra apps, no export steps.                                             |
 | 🧠 **AI-powered**              | Background removal runs 100% locally on your GPU (or CPU). No uploads, no API keys, no internet needed after setup. |
 | 👻 **Click-through**           | Transparent areas are truly transparent — your mouse passes right through to whatever's underneath.                 |
 | 💾 **Remembers everything**    | Close your laptop, reboot, whatever — your stickers come back exactly where you left them.                          |
