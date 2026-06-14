@@ -14,19 +14,41 @@
          silhouette) resizes to the rotated bounding box; the flip is a
          RenderTransform inside it, giving flip-then-rotate like the Python
          version. -->
-    <Grid x:Name="Root">
-        <Grid.LayoutTransform>
-            <RotateTransform x:Name="Rot"
-                    Angle="0"/>
-        </Grid.LayoutTransform>
-        <Image x:Name="Img"
-               Stretch="Uniform"
-               RenderTransformOrigin="0.5,0.5"
-               RenderOptions.BitmapScalingMode="HighQuality">
-            <Image.RenderTransform>
-                <ScaleTransform x:Name="Flip"
-                        ScaleX="1"/>
-            </Image.RenderTransform>
-        </Image>
+    <Grid x:Name="Outer">
+        <Grid x:Name="Root">
+            <Grid.LayoutTransform>
+                <RotateTransform x:Name="Rot"
+                        Angle="0"/>
+            </Grid.LayoutTransform>
+            <Image x:Name="Img"
+                   Stretch="Uniform"
+                   RenderTransformOrigin="0.5,0.5"
+                   RenderOptions.BitmapScalingMode="HighQuality">
+                <Image.RenderTransform>
+                    <ScaleTransform x:Name="Flip"
+                            ScaleX="1"/>
+                </Image.RenderTransform>
+            </Image>
+        </Grid>
+
+        <!-- Busy indicator: shown while (re-)matting. Sits centred and upright
+             (sibling of Root, so the sticker's rotation doesn't spin it), is
+             click-through, and has a fixed compact size so it never enlarges a
+             small sticker. The ring is animated from code via SpinRot. -->
+        <Border x:Name="Busy"
+                Visibility="Collapsed"
+                IsHitTestVisible="False"
+                Width="38" Height="38"
+                HorizontalAlignment="Center" VerticalAlignment="Center"
+                Background="#B0000000" CornerRadius="19">
+            <Ellipse Width="20" Height="20"
+                     Stroke="White" StrokeThickness="3"
+                     StrokeDashArray="3.4 2.6" StrokeDashCap="Round"
+                     RenderTransformOrigin="0.5,0.5">
+                <Ellipse.RenderTransform>
+                    <RotateTransform x:Name="SpinRot"/>
+                </Ellipse.RenderTransform>
+            </Ellipse>
+        </Border>
     </Grid>
 </Window>

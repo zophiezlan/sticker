@@ -5,6 +5,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 
 namespace StickerApp;
@@ -16,6 +17,10 @@ public partial class StickerWindow : Window
 
     private readonly string _sourcePath;
     private readonly bool _noMatte;
+
+    // Which model produced the matte currently shown — drives the menu checkmark
+    // and the "re-process" action. Starts as the app default used at open time.
+    private string _currentModel = App.ActiveModel;
 
     private BitmapImage _matted;
     private BitmapImage? _original;
@@ -334,16 +339,13 @@ public partial class StickerWindow : Window
         encoder.Save(fs);
     }
 
-    private async void Rematte(string? model = null)
+    private async void Rematte(string? model = null, bool force = false)
     {
         Mouse.OverrideCursor = Cursors.Wait;
+        SetBusy(true);
         try
         {
-            string path = await App.RematteAsync(_sourcePath, model);
-            _matted = LoadBitmap(path, ignoreCache: true);
-            if (!_showingOriginal)
-                Img.Source = _matted;
-            ApplyVisuals(keepCenter: true);
+            await RematteWithFallback(model, force);
         }
         catch (Exception ex)
         {
@@ -352,7 +354,82 @@ public partial class StickerWindow : Window
         finally
         {
             Mouse.OverrideCursor = null;
+            SetBusy(false);
         }
+    }
+
+    /// <summary>
+    /// GPU first; on a GPU-memory failure, free other warm GPU sessions and try
+    /// the GPU once more (the model may simply not fit alongside the others on a
+    /// limited card). Only if it still won't fit do we offer the slower CPU path.
+    /// </summary>
+    private async Task RematteWithFallback(string? model, bool force)
+    {
+        try
+        {
+            await RematteCore(model, forceCpu: false, force);
+            return;
+        }
+        catch (Exception ex) when (Matting.IsGpuMemoryError(ex))
+        {
+            App.TrimGpuSessions();   // free VRAM held by other warm models, then retry GPU
+        }
+
+        try
+        {
+            await RematteCore(model, forceCpu: false, force);
+            return;
+        }
+        catch (Exception ex) when (Matting.IsGpuMemoryError(ex))
+        {
+            // Still won't fit on the GPU — offer the (slower) CPU. Ask first and
+            // warn it's slow, so a long run reads as expected work rather than a
+            // frozen app the user force-quits.
+        }
+
+        Mouse.OverrideCursor = null;
+        SetBusy(false);
+        var choice = MessageBox.Show(
+            "This model ran out of GPU memory.\n\n"
+            + "Retry on the CPU instead? It will produce the same result, but "
+            + "can take anywhere from several seconds to a few minutes depending "
+            + "on your machine. The app stays responsive while it works.",
+            "Sticker — not enough GPU memory",
+            MessageBoxButton.YesNo, MessageBoxImage.Question);
+        if (choice != MessageBoxResult.Yes)
+            return;
+
+        // Keep the spinner + wait cursor through the CPU pass so there's the same
+        // "working" feedback the GPU path gives.
+        Mouse.OverrideCursor = Cursors.Wait;
+        SetBusy(true);
+        await RematteCore(model, forceCpu: true, force);
+    }
+
+    /// <summary>Show/hide the on-sticker busy spinner (and start/stop its rotation).</summary>
+    private void SetBusy(bool on)
+    {
+        Busy.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+        if (on)
+            SpinRot.BeginAnimation(RotateTransform.AngleProperty,
+                new DoubleAnimation(0, 360, TimeSpan.FromSeconds(0.9))
+                {
+                    RepeatBehavior = RepeatBehavior.Forever,
+                });
+        else
+            SpinRot.BeginAnimation(RotateTransform.AngleProperty, null);   // stop animating
+    }
+
+    /// <summary>Run the matte and apply the result; throws on failure for the caller to handle.</summary>
+    private async Task RematteCore(string? model, bool forceCpu, bool force)
+    {
+        string path = await App.RematteAsync(_sourcePath, model, forceCpu, force);
+        _matted = LoadBitmap(path, ignoreCache: true);
+        if (!_showingOriginal)
+            Img.Source = _matted;
+        ApplyVisuals(keepCenter: true);
+        if (model != null)
+            _currentModel = model;   // track the active model for the menu/checkmark
     }
 
     // --- context menu ---
@@ -390,12 +467,25 @@ public partial class StickerWindow : Window
 
         if (!_noMatte)
         {
-            // Realistic reason to re-matte is a bad result — offer different models.
-            // (First use of a model downloads it: BiRefNet is ~1 GB.)
+            // Model picker — checkable items, cache-aware. Switching to a model
+            // you've already run loads instantly from the on-disk cache (no
+            // re-inference); a model you haven't tried yet runs once (downloading
+            // first if needed — BiRefNet is ~900 MB), then it's cached too.
+            // "Re-process" forces a fresh run of the current model, ignoring cache.
             menu.Items.Add(new Separator());
-            AddItem(menu, "Re-matte — ISNet (default)", "", () => Rematte("isnet-general-use"));
-            AddItem(menu, "Re-matte — U2Net Human (portraits)", "", () => Rematte("u2net_human_seg"));
-            AddItem(menu, "Re-matte — BiRefNet (best, slow)", "", () => Rematte("birefnet-general"));
+            AddModelChoice(menu.Items, "Matte: ISNet — general (default)", "isnet-general-use");
+            AddModelChoice(menu.Items, "Matte: U2Net — people & portraits", "u2net_human_seg");
+            AddModelChoice(menu.Items, "Matte: BiRefNet — best (slow)", "birefnet-general");
+            AddItem(menu, "Re-process current (ignore cache)", "", () => Rematte(_currentModel, force: true));
+
+            // Checkmarks are set at build time; refresh them to the active model
+            // each time the menu opens, since the selection changes at runtime.
+            menu.Opened += (_, _) =>
+            {
+                foreach (var obj in menu.Items)
+                    if (obj is MenuItem mi && mi.Tag is string tag)
+                        mi.IsChecked = tag == _currentModel;
+            };
         }
 
         menu.Items.Add(new Separator());
@@ -410,6 +500,20 @@ public partial class StickerWindow : Window
         var item = new MenuItem { Header = header, InputGestureText = gesture };
         item.Click += (_, _) => action();
         menu.Items.Add(item);
+    }
+
+    /// <summary>A checkable model entry that switches model cache-aware (no forced re-run).</summary>
+    private void AddModelChoice(ItemCollection items, string label, string model)
+    {
+        var item = new MenuItem
+        {
+            Header = label,
+            Tag = model,
+            IsCheckable = true,
+            IsChecked = _currentModel == model,
+        };
+        item.Click += (_, _) => Rematte(model);   // force:false → uses cache if present
+        items.Add(item);
     }
 
     protected override void OnClosed(EventArgs e)
