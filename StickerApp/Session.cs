@@ -47,15 +47,46 @@ public static class Session
 
     public static List<StickerState> Load()
     {
+        var result = new List<StickerState>();
         try
         {
             if (!File.Exists(FilePath))
-                return new();
-            return JsonSerializer.Deserialize<List<StickerState>>(File.ReadAllText(FilePath)) ?? new();
+                return result;
+
+            using var doc = JsonDocument.Parse(File.ReadAllText(FilePath));
+
+            // The file is a flat array, shared verbatim with the Python prototype,
+            // so we can't add a version envelope without breaking it. Instead, be
+            // tolerant on read: accept the array (or a future {"stickers":[…]}
+            // object, for forward-compat), then deserialize each entry on its own
+            // and skip any that are malformed — a hand-edit, a partial write, or a
+            // future field change loses one sticker, not the whole session.
+            JsonElement root = doc.RootElement;
+            JsonElement array =
+                root.ValueKind == JsonValueKind.Array ? root
+                : root.ValueKind == JsonValueKind.Object && root.TryGetProperty("stickers", out var s) ? s
+                : default;
+            if (array.ValueKind != JsonValueKind.Array)
+                return result;
+
+            foreach (var el in array.EnumerateArray())
+            {
+                try
+                {
+                    var state = el.Deserialize<StickerState>();
+                    if (state is not null && !string.IsNullOrWhiteSpace(state.Source))
+                        result.Add(state);
+                }
+                catch (JsonException)
+                {
+                    // Skip this entry; keep the rest of the session.
+                }
+            }
         }
         catch (Exception)
         {
-            return new();
+            // Unreadable/corrupt file — start fresh rather than crash.
         }
+        return result;
     }
 }
