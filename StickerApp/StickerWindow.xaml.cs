@@ -18,6 +18,9 @@ public partial class StickerWindow : Window
     private readonly string _sourcePath;
     private readonly bool _noMatte;
 
+    /// <summary>Path to the original image this sticker was created from.</summary>
+    public string SourcePath => _sourcePath;
+
     // Which model produced the matte currently shown — drives the menu checkmark
     // and the "re-process" action. Starts as the app default used at open time.
     private string _currentModel = App.ActiveModel;
@@ -36,11 +39,14 @@ public partial class StickerWindow : Window
     private BitmapImage Current => _showingOriginal ? _original! : _matted;
 
     public StickerWindow(string imagePath, string sourcePath,
-                         bool noMatte = false, StickerState? state = null)
+                         bool noMatte = false, StickerState? state = null,
+                         string? matteModel = null)
     {
         InitializeComponent();
         _sourcePath = sourcePath;
         _noMatte = noMatte;
+        if (!string.IsNullOrEmpty(matteModel))
+            _currentModel = matteModel;   // the model that actually produced this matte
 
         _matted = LoadBitmap(imagePath);
         Img.Source = _matted;
@@ -106,6 +112,7 @@ public partial class StickerWindow : Window
         Opacity = Opacity,
         OnTop = Topmost,
         Pinned = _pinned,
+        Model = _noMatte ? null : _currentModel,
     };
 
     // --- pin (click-through) ---
@@ -460,8 +467,10 @@ public partial class StickerWindow : Window
             menu.Items.Add(_toggleItem);
         }
 
-        AddItem(menu, "Rotate 90° right", "R", () => Rotate(90));
-        AddItem(menu, "Rotate 90° left", "Shift+R", () => Rotate(-90));
+        // No gesture text: the R / Shift+R keys rotate 15° (fine adjust), while
+        // these menu items do a coarse 90°, so showing "R" here would mislabel it.
+        AddItem(menu, "Rotate 90° right", "", () => Rotate(90));
+        AddItem(menu, "Rotate 90° left", "", () => Rotate(-90));
         AddItem(menu, "Flip horizontal", "F", FlipHorizontal);
         AddItem(menu, "Save cutout as PNG…", "S", SaveCutout);
 

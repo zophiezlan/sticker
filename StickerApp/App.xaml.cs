@@ -1,6 +1,8 @@
 using System.IO;
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using System.Windows;
@@ -14,7 +16,11 @@ namespace StickerApp;
 
 public partial class App : Application
 {
-    private const string PipeName = "sticker-csharp-single-instance";
+    // Per-session pipe name (the single-instance mutex below is session-local
+    // too), so a second login session on the same machine gets its own instance
+    // instead of fighting the first over the machine-global pipe namespace.
+    private static readonly string PipeName =
+        $"sticker-csharp-single-instance-{System.Diagnostics.Process.GetCurrentProcess().SessionId}";
     private const string MutexName = "StickerApp.SingleInstance";
 
     public static readonly List<StickerWindow> Stickers = new();
@@ -31,6 +37,15 @@ public partial class App : Application
     private static readonly TimeSpan IdleEvictAfter = ResolveIdleEvict();
     private System.Threading.Timer? _idleEvict;
     private int _matteInFlight;
+
+    // Only one matte runs at a time. The session-lifecycle code (model-switch
+    // eviction in GetMatting, TrimGpuSessions, idle/exit disposal) assumes no
+    // InferenceSession.Run is in flight when it disposes a session — this gate
+    // makes that true rather than merely hoped-for. Every matte acquires it;
+    // anything that disposes a session must hold it too, OR try-acquire and skip
+    // when a matte is running. (Not reentrant: code already under the gate, i.e.
+    // inside a matte's Task.Run, must NOT re-acquire — see EvictMatting.)
+    private static readonly SemaphoreSlim _matteGate = new(1, 1);
 
     private static TimeSpan ResolveIdleEvict()
     {
@@ -55,12 +70,25 @@ public partial class App : Application
             BumpIdleTimer();
             return;
         }
-        lock (_mattings)
+        // Never dispose a session mid-Run. Take the matte gate first; if a matte
+        // holds it (a CPU birefnet pass can run for minutes), skip — the timer
+        // re-arms and retries, and on exit the OS reclaims everything anyway.
+        if (!_matteGate.Wait(0))
         {
-            foreach (var m in _mattings.Values)
-                m.Dispose();
-            _mattings.Clear();
+            if (fromTimer)
+                BumpIdleTimer();
+            return;
         }
+        try
+        {
+            lock (_mattings)
+            {
+                foreach (var m in _mattings.Values)
+                    m.Dispose();
+                _mattings.Clear();
+            }
+        }
+        finally { _matteGate.Release(); }
     }
 
     private WinForms.NotifyIcon? _tray;
@@ -86,23 +114,32 @@ public partial class App : Application
         string key = MattingKey(model, forceCpu);
         lock (_mattings)
         {
-            if (!_mattings.TryGetValue(key, out var m))
-            {
-                // Cap warm GPU sessions at one. Stacking warm GPU sessions is what
-                // drove runaway commit (each holds its model weights + a DirectML
-                // arena that never shrinks), so before standing up a new GPU
-                // session, dispose any other warm GPU sessions. CPU sessions (plain
-                // RAM, used only for the VRAM fallback) are left untouched. Mattes
-                // are serialised through the UI, so a session being evicted here is
-                // not one another thread is mid-Run on.
-                if (!forceCpu)
-                    foreach (var k in _mattings.Keys.Where(k => !k.EndsWith("|cpu")).ToList())
-                        if (_mattings.Remove(k, out var old))
-                            old.Dispose();
+            if (_mattings.TryGetValue(key, out var existing))
+                return existing;
 
-                _mattings[key] = m = new Matting(model, forceCpu);
-            }
-            return m;
+            // Cap warm GPU sessions at one. Stacking warm GPU sessions is what
+            // drove runaway commit (each holds its model weights + a DirectML
+            // arena that never shrinks), so before standing up a new GPU session,
+            // dispose any other warm GPU sessions — and do it *before* loading the
+            // new one so a heavy model gets the freed VRAM. CPU sessions (plain
+            // RAM, used only for the VRAM fallback) are left untouched. _matteGate
+            // serialises mattes, so nothing evicted here is one mid-Run.
+            if (!forceCpu)
+                foreach (var k in _mattings.Keys.Where(k => !k.EndsWith("|cpu")).ToList())
+                    if (_mattings.Remove(k, out var old))
+                        old.Dispose();
+        }
+
+        // Construct OUTSIDE the lock: a first-use download can take minutes and a
+        // heavy model's VRAM load is slow — holding _mattings across that would
+        // stall the idle timer, exit, and other lookups. _matteGate ensures only
+        // one matte (hence one GetMatting) runs at a time, so there's no racing
+        // constructor; _matteInFlight is already raised, so the idle timer defers.
+        var created = new Matting(model, forceCpu);
+        lock (_mattings)
+        {
+            _mattings[key] = created;
+            return created;
         }
     }
 
@@ -113,6 +150,8 @@ public partial class App : Application
     /// VRAM that never comes back while the session lives, which then starves
     /// *other* models' re-mattes. Evicting the failed session frees it so the
     /// next attempt — even of a different, lighter model — starts clean.
+    /// Caller must already hold <see cref="_matteGate"/> (it's called from inside a
+    /// matte's gated Task.Run) so it never frees a session another matte is running.
     /// </summary>
     private void EvictMatting(string model, bool forceCpu)
     {
@@ -133,17 +172,47 @@ public partial class App : Application
     public static void TrimGpuSessions()
     {
         var app = (App)Current;
-        lock (app._mattings)
+        // Best-effort VRAM reclaim before a CPU fallback. Only dispose when no
+        // matte is running (gate free) — otherwise we'd risk freeing a live
+        // session. The caller (RematteWithFallback) invokes this between gated
+        // attempts, so the gate is normally free here.
+        if (!_matteGate.Wait(0))
+            return;
+        try
         {
-            foreach (var key in app._mattings.Keys.Where(k => !k.EndsWith("|cpu")).ToList())
-                if (app._mattings.Remove(key, out var m))
-                    m.Dispose();
+            lock (app._mattings)
+            {
+                foreach (var key in app._mattings.Keys.Where(k => !k.EndsWith("|cpu")).ToList())
+                    if (app._mattings.Remove(key, out var m))
+                        m.Dispose();
+            }
         }
+        finally { _matteGate.Release(); }
     }
 
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        // A stray UI-thread exception shouldn't take the tray (and every open
+        // sticker) down with it — surface it and stay running. On a fatal
+        // background-thread crash we can't keep running, but we can at least try
+        // to persist the session so stickers come back on relaunch.
+        DispatcherUnhandledException += (_, ex) =>
+        {
+            try
+            {
+                _tray?.ShowBalloonTip(5000, "Sticker",
+                    "Something went wrong, but Sticker is still running.\n" + ex.Exception.Message,
+                    WinForms.ToolTipIcon.Warning);
+            }
+            catch { /* notification is best-effort */ }
+            ex.Handled = true;
+        };
+        AppDomain.CurrentDomain.UnhandledException += (_, _) =>
+        {
+            try { FlushSessionNow(); } catch { /* last-gasp; swallow */ }
+        };
 
         var args = e.Args.ToList();
         bool noMatte = args.Remove("--no-matte");
@@ -184,6 +253,7 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        FlushSessionNow();   // persist any debounced session write before we go
         if (_hotkeySource is not null)
         {
             UnregisterHotKey(_hotkeySource.Handle, HotkeyId);
@@ -258,6 +328,7 @@ public partial class App : Application
                 encoder.Frames.Add(BitmapFrame.Create(image));
                 using (var fs = File.Create(file))
                     encoder.Save(fs);
+                PruneClipboardCaptures(dir, file);
                 OpenStickers(new() { file }, false, false);
                 return;
             }
@@ -288,6 +359,33 @@ public partial class App : Application
     private static bool IsImageFile(string? path) =>
         Path.GetExtension(path ?? "").ToLowerInvariant()
             is ".jpg" or ".jpeg" or ".png" or ".webp" or ".bmp" or ".gif";
+
+    /// <summary>
+    /// Bound the clipboard-capture folder. Pasted screenshots/images are saved as
+    /// throwaway clip-*.png; left alone they accumulate forever (and "Clear matte
+    /// cache" only touches the top-level cache, not this subfolder). Keep any that
+    /// an open sticker still references (so a close+restore round-trip survives),
+    /// plus the most recent few; delete the rest.
+    /// </summary>
+    private static void PruneClipboardCaptures(string dir, string justWrote)
+    {
+        const int KeepRecent = 20;
+        try
+        {
+            var referenced = new HashSet<string>(
+                Stickers.Select(w => w.SourcePath), StringComparer.OrdinalIgnoreCase)
+            {
+                Path.GetFullPath(justWrote),
+            };
+            foreach (var fi in Directory.EnumerateFiles(dir, "clip-*.png")
+                         .Where(f => !referenced.Contains(Path.GetFullPath(f)))
+                         .Select(f => new FileInfo(f))
+                         .OrderByDescending(fi => fi.LastWriteTimeUtc)
+                         .Skip(KeepRecent))
+                try { fi.Delete(); } catch { /* locked or already gone — skip */ }
+        }
+        catch { /* best effort; never block a paste over cleanup */ }
+    }
 
     // --- startup toggle ---
     //
@@ -500,20 +598,45 @@ public partial class App : Application
                     continue;
                 }
                 string image = file;
+                string? usedModel = null;
                 if (!nm)
                 {
-                    // Model load/download happens off the UI thread
-                    image = await Task.Run(() =>
+                    // Restored stickers remember the model they were matted with,
+                    // but only reuse it when that cutout is already cached (instant)
+                    // — otherwise we'd kick off a slow re-matte (e.g. BiRefNet) at
+                    // restore/login. New stickers and cache-misses use the default.
+                    string m = _model;
+                    if (state?.Model is { Length: > 0 } saved
+                        && Matting.CachedMatteExists(file, saved))
+                        m = saved;
+                    usedModel = m;
+
+                    if (Matting.CachedMatteExists(file, m))
                     {
-                        Interlocked.Increment(ref _matteInFlight);
-                        try { return GetMatting(_model).RemoveBackground(file); }
-                        finally { Interlocked.Decrement(ref _matteInFlight); }
-                    });
+                        // Already on disk — show it without loading any model.
+                        image = Matting.CachePathFor(file, m);
+                    }
+                    else
+                    {
+                        // One matte at a time (see _matteGate); model load/download
+                        // and inference all happen off the UI thread.
+                        await _matteGate.WaitAsync();
+                        try
+                        {
+                            image = await Task.Run(() =>
+                            {
+                                Interlocked.Increment(ref _matteInFlight);
+                                try { return GetMatting(m).RemoveBackground(file); }
+                                finally { Interlocked.Decrement(ref _matteInFlight); }
+                            });
+                        }
+                        finally { _matteGate.Release(); }
+                    }
                 }
                 notice?.Close();
                 notice = null;
 
-                var w = new StickerWindow(image, file, nm, state);
+                var w = new StickerWindow(image, file, nm, state, usedModel);
                 Stickers.Add(w);
                 w.Show();
                 w.Activate();
@@ -528,9 +651,14 @@ public partial class App : Application
 
         // The batch above shares one warm session so a multi-sticker restore
         // doesn't reload the model per image; once it's done, release the heavy
-        // model's arena (light models stay warm — they're cheap).
+        // model's arena (light models stay warm — they're cheap). Take the gate
+        // so we don't evict a session a re-matte just started on another path.
         if (IsHeavyModel(_model))
-            EvictMatting(_model, forceCpu: false);
+        {
+            await _matteGate.WaitAsync();
+            try { EvictMatting(_model, forceCpu: false); }
+            finally { _matteGate.Release(); }
+        }
         if (needsMatting)
             BumpIdleTimer();
 
@@ -624,33 +752,38 @@ public partial class App : Application
                 WinForms.ToolTipIcon.Info);
         try
         {
-            return await Task.Run(() =>
+            await _matteGate.WaitAsync();   // one matte at a time
+            try
             {
-                Interlocked.Increment(ref app._matteInFlight);
-                try
+                return await Task.Run(() =>
                 {
-                    string result = app.GetMatting(m, forceCpu).RemoveBackground(source, force);
-                    // Heavy models pin gigabytes for the life of the process if kept
-                    // warm, so drop the session now that this run is done. Light
-                    // sessions stay warm but the idle clock starts ticking.
-                    if (IsHeavyModel(m))
+                    Interlocked.Increment(ref app._matteInFlight);
+                    try
+                    {
+                        string result = app.GetMatting(m, forceCpu).RemoveBackground(source, force);
+                        // Heavy models pin gigabytes for the life of the process if kept
+                        // warm, so drop the session now that this run is done. Light
+                        // sessions stay warm but the idle clock starts ticking.
+                        if (IsHeavyModel(m))
+                            app.EvictMatting(m, forceCpu);
+                        return result;
+                    }
+                    catch
+                    {
+                        // Don't let a failed session squat on VRAM/RAM and poison the
+                        // next re-matte (even of another model). Drop it, then rethrow
+                        // so the UI can still surface the error / offer a CPU retry.
                         app.EvictMatting(m, forceCpu);
-                    return result;
-                }
-                catch
-                {
-                    // Don't let a failed session squat on VRAM/RAM and poison the
-                    // next re-matte (even of another model). Drop it, then rethrow
-                    // so the UI can still surface the error / offer a CPU retry.
-                    app.EvictMatting(m, forceCpu);
-                    throw;
-                }
-                finally
-                {
-                    Interlocked.Decrement(ref app._matteInFlight);
-                    app.BumpIdleTimer();   // (re)start the idle clock once work settles
-                }
-            });
+                        throw;
+                    }
+                    finally
+                    {
+                        Interlocked.Decrement(ref app._matteInFlight);
+                        app.BumpIdleTimer();   // (re)start the idle clock once work settles
+                    }
+                });
+            }
+            finally { _matteGate.Release(); }
         }
         finally
         {
@@ -658,11 +791,46 @@ public partial class App : Application
         }
     }
 
+    // session.json is touched on many small UI events (every resize/opacity notch,
+    // every drag end). Capture synchronously on the calling (UI) thread — reading
+    // window state off-thread isn't safe — but debounce the disk write so a burst
+    // coalesces into a single off-UI-thread I/O instead of rewriting the file per
+    // notch. Shutdown flushes synchronously (see FlushSessionNow / OnExit).
+    private static readonly object _saveLock = new();
+    private static List<StickerState>? _pendingSave;
+    private static System.Threading.Timer? _saveTimer;
+
     public static void SaveSession()
     {
         if (_suppressSave)
             return;
-        Session.Save(Stickers.Select(w => w.CaptureState()));
+        var snapshot = Stickers.Select(w => w.CaptureState()).ToList();
+        lock (_saveLock)
+        {
+            _pendingSave = snapshot;
+            _saveTimer ??= new System.Threading.Timer(_ => FlushSession());
+            _saveTimer.Change(400, Timeout.Infinite);
+        }
+    }
+
+    private static void FlushSession()
+    {
+        List<StickerState>? snapshot;
+        lock (_saveLock)
+        {
+            snapshot = _pendingSave;
+            _pendingSave = null;
+        }
+        if (snapshot is not null)
+            Session.Save(snapshot);
+    }
+
+    /// <summary>Write any debounced session immediately — used on shutdown.</summary>
+    private static void FlushSessionNow()
+    {
+        lock (_saveLock)
+            _saveTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+        FlushSession();
     }
 
     public static void NotifyClosed(StickerWindow w)
@@ -678,10 +846,18 @@ public partial class App : Application
     {
         SaveSession();          // snapshot first so --restore brings everything back
         _suppressSave = true;
-        foreach (var w in Stickers.ToList())
-            w.Close();
-        Stickers.Clear();
-        _suppressSave = false;
+        try
+        {
+            foreach (var w in Stickers.ToList())
+                w.Close();
+            Stickers.Clear();
+        }
+        finally
+        {
+            // Always re-enable saving, even if a Close() throws — otherwise the
+            // session would silently stop persisting for the rest of the process.
+            _suppressSave = false;
+        }
     }
 
     // --- single instance plumbing ---
@@ -695,15 +871,24 @@ public partial class App : Application
 
     private void StartPipeServer()
     {
+        // Restrict the pipe to the current user: combined with the per-session
+        // name, that isolates this instance from any other user/session and stops
+        // another account from injecting handoff messages.
+        var security = new PipeSecurity();
+        security.AddAccessRule(new PipeAccessRule(
+            WindowsIdentity.GetCurrent().User!,
+            PipeAccessRights.FullControl, AccessControlType.Allow));
+
         Task.Run(async () =>
         {
             while (true)
             {
                 try
                 {
-                    using var server = new NamedPipeServerStream(
+                    using var server = NamedPipeServerStreamAcl.Create(
                         PipeName, PipeDirection.In, 1,
-                        PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+                        PipeTransmissionMode.Byte, PipeOptions.Asynchronous,
+                        0, 0, security);
                     await server.WaitForConnectionAsync();
                     using var reader = new StreamReader(server, Encoding.UTF8);
                     string? line = await reader.ReadLineAsync();
@@ -716,7 +901,9 @@ public partial class App : Application
                 }
                 catch
                 {
-                    // Malformed message or broken pipe — keep serving.
+                    // Malformed message or broken pipe — keep serving, but pause
+                    // briefly so a persistent failure can't spin the CPU.
+                    await Task.Delay(500);
                 }
             }
         });
