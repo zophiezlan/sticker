@@ -174,6 +174,21 @@ public sealed class Matting : IDisposable
     /// </summary>
     public static event Action<string, long, long?>? DownloadProgress;
 
+    /// <summary>
+    /// Pinned SHA-256 of each shipped model file, keyed by file name. Models are
+    /// executable compute graphs fed to ONNX Runtime, so a corrupted or
+    /// substituted download must never be loaded. Verified after download, before
+    /// the file is promoted into place. Values were computed from the known-good
+    /// rembg release downloads; a model with no entry here (e.g. a custom
+    /// <c>--model</c>) is accepted without a check.
+    /// </summary>
+    private static readonly Dictionary<string, string> ExpectedSha256 = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["isnet-general-use.onnx"] = "60920e99c45464f2ba57bee2ad08c919a52bbf852739e96947fbb4358c0d964a",
+        ["u2net_human_seg.onnx"] = "01eb6a29a5c4d8edb30b56adad9bb3a2a0535338e480724a213e0acfd2d1c73c",
+        ["BiRefNet-general-epoch_244.onnx"] = "58f621f00f5d756097615970a88a791584600dcf7c45b18a0a6267535a1ebd3c",
+    };
+
     private static void DownloadModel(string model)
     {
         Directory.CreateDirectory(ModelDir);
@@ -210,6 +225,22 @@ public sealed class Matting : IDisposable
                     DownloadProgress?.Invoke(model, read, total);
                 }
             }
+
+            // Integrity gate: verify the freshly written .part before promoting it
+            // to the real path. On mismatch we throw — the catch below deletes the
+            // .part, so a bad download simply retries next time rather than being
+            // left to crash on load. Hash is streamed so a ~900 MB model isn't
+            // slurped into a single byte[].
+            if (ExpectedSha256.TryGetValue(SpecFor(model).FileName, out string? expected))
+            {
+                string actual;
+                using (var check = File.OpenRead(tmp))
+                    actual = Convert.ToHexString(SHA256.HashData(check)).ToLowerInvariant();
+                if (!string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException(
+                        $"Downloaded model '{SpecFor(model).FileName}' failed its integrity "
+                        + $"check (expected {expected[..12]}…, got {actual[..12]}…); not installed.");
+            }
             File.Move(tmp, dest, overwrite: true);
         }
         catch
@@ -220,14 +251,29 @@ public sealed class Matting : IDisposable
     }
 
     /// <summary>Mirror of the Python prototype's cache key: sha1(path|mtime_ns|model)[:16].</summary>
-    public string CachePath(string source)
+    public static string CachePathFor(string source, string model)
     {
         string full = Path.GetFullPath(source);
         long mtimeNs = (File.GetLastWriteTimeUtc(full) - DateTime.UnixEpoch).Ticks * 100;
-        string key = $"{full}|{mtimeNs}|{_model}";
+        string key = $"{full}|{mtimeNs}|{model}";
         string hash = Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes(key)))
                       [..16].ToLowerInvariant();
         return Path.Combine(CacheDir, $"{Path.GetFileNameWithoutExtension(full)}.{hash}.png");
+    }
+
+    /// <summary>The cache path for this session's model.</summary>
+    public string CachePath(string source) => CachePathFor(source, _model);
+
+    /// <summary>
+    /// True if a matte for <paramref name="source"/> with <paramref name="model"/>
+    /// is already on disk — i.e. it can be shown instantly, without loading the
+    /// model or running inference. Lets a restored sticker keep its original
+    /// (possibly heavy) model only when doing so costs nothing.
+    /// </summary>
+    public static bool CachedMatteExists(string source, string model)
+    {
+        try { return File.Exists(CachePathFor(source, model)); }
+        catch { return false; }   // odd/invalid path — treat as not cached
     }
 
     // One lock object per distinct output path. Without this, two concurrent

@@ -21,6 +21,7 @@ public sealed class StickerState
     [JsonPropertyName("opacity")] public double Opacity { get; set; } = 1.0;
     [JsonPropertyName("on_top")] public bool OnTop { get; set; } = true;
     [JsonPropertyName("pinned")] public bool Pinned { get; set; }  // extra key; Python ignores it
+    [JsonPropertyName("model")] public string? Model { get; set; } // extra key; Python ignores it
 }
 
 public static class Session
