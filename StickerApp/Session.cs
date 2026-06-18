@@ -26,10 +26,7 @@ public sealed class StickerState
 
 public static class Session
 {
-    private static readonly string Dir =
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".sticker_cache");
-
-    private static readonly string FilePath = Path.Combine(Dir, "session.json");
+    private static readonly string FilePath = StickerPaths.SessionFile;
 
     private static readonly JsonSerializerOptions Options = new() { WriteIndented = true };
 
@@ -37,7 +34,7 @@ public static class Session
     {
         try
         {
-            Directory.CreateDirectory(Dir);
+            Directory.CreateDirectory(StickerPaths.CacheDir);
             File.WriteAllText(FilePath, JsonSerializer.Serialize(states.ToList(), Options));
         }
         catch (Exception)
@@ -48,45 +45,50 @@ public static class Session
 
     public static List<StickerState> Load()
     {
-        var result = new List<StickerState>();
         try
         {
-            if (!File.Exists(FilePath))
-                return result;
-
-            using var doc = JsonDocument.Parse(File.ReadAllText(FilePath));
-
-            // The file is a flat array, shared verbatim with the Python prototype,
-            // so we can't add a version envelope without breaking it. Instead, be
-            // tolerant on read: accept the array (or a future {"stickers":[…]}
-            // object, for forward-compat), then deserialize each entry on its own
-            // and skip any that are malformed — a hand-edit, a partial write, or a
-            // future field change loses one sticker, not the whole session.
-            JsonElement root = doc.RootElement;
-            JsonElement array =
-                root.ValueKind == JsonValueKind.Array ? root
-                : root.ValueKind == JsonValueKind.Object && root.TryGetProperty("stickers", out var s) ? s
-                : default;
-            if (array.ValueKind != JsonValueKind.Array)
-                return result;
-
-            foreach (var el in array.EnumerateArray())
-            {
-                try
-                {
-                    var state = el.Deserialize<StickerState>();
-                    if (state is not null && !string.IsNullOrWhiteSpace(state.Source))
-                        result.Add(state);
-                }
-                catch (JsonException)
-                {
-                    // Skip this entry; keep the rest of the session.
-                }
-            }
+            return File.Exists(FilePath) ? Parse(File.ReadAllText(FilePath)) : new();
         }
         catch (Exception)
         {
             // Unreadable/corrupt file — start fresh rather than crash.
+            return new();
+        }
+    }
+
+    /// <summary>
+    /// Parse the session JSON tolerantly. The file is a flat array shared verbatim
+    /// with the Python prototype, so we can't add a version envelope without breaking
+    /// it — instead, accept the array (or a future {"stickers":[…]} object, for
+    /// forward-compat), deserialize each entry on its own, and skip any that are
+    /// malformed or have no source. A hand-edit, partial write, or future field change
+    /// then loses one sticker, not the whole session. Pure (string in, list out) so it
+    /// can be unit-tested without touching the real session file.
+    /// </summary>
+    internal static List<StickerState> Parse(string json)
+    {
+        var result = new List<StickerState>();
+        using var doc = JsonDocument.Parse(json);
+        JsonElement root = doc.RootElement;
+        JsonElement array =
+            root.ValueKind == JsonValueKind.Array ? root
+            : root.ValueKind == JsonValueKind.Object && root.TryGetProperty("stickers", out var s) ? s
+            : default;
+        if (array.ValueKind != JsonValueKind.Array)
+            return result;
+
+        foreach (var el in array.EnumerateArray())
+        {
+            try
+            {
+                var state = el.Deserialize<StickerState>();
+                if (state is not null && !string.IsNullOrWhiteSpace(state.Source))
+                    result.Add(state);
+            }
+            catch (JsonException)
+            {
+                // Skip this entry; keep the rest of the session.
+            }
         }
         return result;
     }

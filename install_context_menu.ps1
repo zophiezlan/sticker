@@ -13,7 +13,7 @@ param(
 # Register per-extension rather than under the "image" PerceivedType. PerceivedType
 # is set inconsistently (e.g. .webp often lacks it, so the entry only showed for
 # .jpg), so a per-extension verb is the reliable way to cover every type the app
-# actually opens. Keep this list in sync with App.IsImageFile in StickerApp.
+# actually opens. Keep this list in sync with App.ImageExtensions in StickerApp.
 $extensions = @(".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif")
 $keys = $extensions | ForEach-Object {
     "HKCU:\Software\Classes\SystemFileAssociations\$_\shell\OpenAsSticker"
