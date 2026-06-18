@@ -37,7 +37,7 @@ All notable changes to Sticker are documented here.
 - **Picking a second matting model while one is still running is now ignored**,
   so the on-sticker busy spinner can't clear while inference is still going.
 - **`--resume` no longer forgets a sticker's model** when its cached cutout is
-  missing. Previously the restore fell back to the default model *and* wrote that
+  missing. Previously the restore fell back to the default model _and_ wrote that
   default back to `session.json`, permanently losing the original choice; the
   intended model is now preserved, so a later restore reuses it once the cutout
   is cached again.
