@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.IO;
 using System.Net.Http;
 using System.Security.Cryptography;
@@ -18,26 +17,7 @@ namespace StickerApp;
 /// </summary>
 public sealed class Matting : IDisposable
 {
-    public const string DefaultModel = "isnet-general-use";
-
-    /// <summary>Per-model preprocessing recipe, mirroring rembg's sessions.</summary>
-    private sealed record ModelSpec(int Size, float[] Mean, float[] Std, string FileName);
-
-    private static readonly float[] ImageNetMean = { 0.485f, 0.456f, 0.406f };
-    private static readonly float[] ImageNetStd = { 0.229f, 0.224f, 0.225f };
-    private static readonly float[] HalfMean = { 0.5f, 0.5f, 0.5f };
-    private static readonly float[] UnitStd = { 1f, 1f, 1f };
-
-    private static ModelSpec SpecFor(string model) => model switch
-    {
-        "isnet-general-use" or "isnet-anime" =>
-            new(1024, HalfMean, UnitStd, model + ".onnx"),
-        "u2net" or "u2netp" or "u2net_human_seg" or "silueta" =>
-            new(320, ImageNetMean, ImageNetStd, model + ".onnx"),
-        "birefnet-general" =>
-            new(BirefnetSize(), ImageNetMean, ImageNetStd, "BiRefNet-general-epoch_244.onnx"),
-        _ => new(1024, HalfMean, UnitStd, model + ".onnx"),  // isnet-style guess
-    };
+    public const string DefaultModel = Models.Default;
 
     /// <summary>
     /// BiRefNet runs at 1024² by default, which is very memory-hungry — and
@@ -56,20 +36,14 @@ public sealed class Matting : IDisposable
         return 1024;
     }
 
-    private static readonly string ModelDir =
-        Environment.GetEnvironmentVariable("U2NET_HOME")
-        ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".u2net");
-
-    private static readonly string CacheDir =
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".sticker_cache");
-
     private static string ModelPathFor(string model) =>
-        Path.Combine(ModelDir, SpecFor(model).FileName);
+        Path.Combine(StickerPaths.ModelDir, Models.For(model).FileName);
 
     public static bool ModelFileExists(string model) => File.Exists(ModelPathFor(model));
 
     private readonly string _model;
-    private readonly ModelSpec _spec;
+    private readonly ModelInfo _info;
+    private readonly int _side;
     private readonly InferenceSession _session;
     private readonly string _inputName;
 
@@ -143,7 +117,10 @@ public sealed class Matting : IDisposable
     public Matting(string model = DefaultModel, bool forceCpu = false)
     {
         _model = model;
-        _spec = SpecFor(model);
+        _info = Models.For(model);
+        // BiRefNet (the only heavy model) is the one whose input resolution is
+        // tunable via STICKER_BIREFNET_SIZE; everything else runs at its fixed size.
+        _side = _info.IsHeavy ? BirefnetSize() : _info.Size;
         if (!ModelFileExists(model))
             DownloadModel(model);
 
@@ -174,26 +151,12 @@ public sealed class Matting : IDisposable
     /// </summary>
     public static event Action<string, long, long?>? DownloadProgress;
 
-    /// <summary>
-    /// Pinned SHA-256 of each shipped model file, keyed by file name. Models are
-    /// executable compute graphs fed to ONNX Runtime, so a corrupted or
-    /// substituted download must never be loaded. Verified after download, before
-    /// the file is promoted into place. Values were computed from the known-good
-    /// rembg release downloads; a model with no entry here (e.g. a custom
-    /// <c>--model</c>) is accepted without a check.
-    /// </summary>
-    private static readonly Dictionary<string, string> ExpectedSha256 = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["isnet-general-use.onnx"] = "60920e99c45464f2ba57bee2ad08c919a52bbf852739e96947fbb4358c0d964a",
-        ["u2net_human_seg.onnx"] = "01eb6a29a5c4d8edb30b56adad9bb3a2a0535338e480724a213e0acfd2d1c73c",
-        ["BiRefNet-general-epoch_244.onnx"] = "58f621f00f5d756097615970a88a791584600dcf7c45b18a0a6267535a1ebd3c",
-    };
-
     private static void DownloadModel(string model)
     {
-        Directory.CreateDirectory(ModelDir);
+        Directory.CreateDirectory(StickerPaths.ModelDir);
+        var info = Models.For(model);
         string url = "https://github.com/danielgatis/rembg/releases/download/v0.0.0/"
-                     + SpecFor(model).FileName;
+                     + info.FileName;
         string dest = ModelPathFor(model);
         string tmp = dest + ".part";
 
@@ -227,18 +190,20 @@ public sealed class Matting : IDisposable
             }
 
             // Integrity gate: verify the freshly written .part before promoting it
-            // to the real path. On mismatch we throw — the catch below deletes the
-            // .part, so a bad download simply retries next time rather than being
-            // left to crash on load. Hash is streamed so a ~900 MB model isn't
-            // slurped into a single byte[].
-            if (ExpectedSha256.TryGetValue(SpecFor(model).FileName, out string? expected))
+            // to the real path. Models are executable compute graphs fed to ONNX
+            // Runtime, so a corrupted or substituted download must never load. On
+            // mismatch we throw — the catch below deletes the .part, so a bad
+            // download simply retries next time rather than being left to crash on
+            // load. Hash is streamed so a ~900 MB model isn't slurped into one byte[].
+            // A model with no pinned hash (e.g. a custom --model) is accepted as-is.
+            if (info.Sha256 is { } expected)
             {
                 string actual;
                 using (var check = File.OpenRead(tmp))
                     actual = Convert.ToHexString(SHA256.HashData(check)).ToLowerInvariant();
                 if (!string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
                     throw new InvalidOperationException(
-                        $"Downloaded model '{SpecFor(model).FileName}' failed its integrity "
+                        $"Downloaded model '{info.FileName}' failed its integrity "
                         + $"check (expected {expected[..12]}…, got {actual[..12]}…); not installed.");
             }
             File.Move(tmp, dest, overwrite: true);
@@ -255,14 +220,25 @@ public sealed class Matting : IDisposable
     {
         string full = Path.GetFullPath(source);
         long mtimeNs = (File.GetLastWriteTimeUtc(full) - DateTime.UnixEpoch).Ticks * 100;
-        string key = $"{full}|{mtimeNs}|{model}";
-        string hash = Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes(key)))
-                      [..16].ToLowerInvariant();
-        return Path.Combine(CacheDir, $"{Path.GetFileNameWithoutExtension(full)}.{hash}.png");
+        return Path.Combine(StickerPaths.CacheDir, CacheFileName(full, mtimeNs, model));
     }
 
-    /// <summary>The cache path for this session's model.</summary>
-    public string CachePath(string source) => CachePathFor(source, _model);
+    /// <summary>
+    /// The cache file name for a resolved path + mtime + model:
+    /// <c>{stem}.{sha1(path|mtime_ns|model)[:16]}.png</c>. Pure (no I/O), split out from
+    /// <see cref="CachePathFor"/> so it can be unit-tested and cross-checked against the
+    /// Python prototype's identical scheme (prototype/sticker.py). NOTE the cross-language
+    /// hazard isn't the formula but the mtime unit: .NET ticks×100 gives 100 ns precision
+    /// while Python's st_mtime_ns is 1 ns — equal whole-nanosecond values still match, but
+    /// a filesystem exposing sub-100 ns mtimes could diverge.
+    /// </summary>
+    internal static string CacheFileName(string fullPath, long mtimeNs, string model)
+    {
+        string key = $"{fullPath}|{mtimeNs}|{model}";
+        string hash = Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes(key)))
+                      [..16].ToLowerInvariant();
+        return $"{Path.GetFileNameWithoutExtension(fullPath)}.{hash}.png";
+    }
 
     /// <summary>
     /// True if a matte for <paramref name="source"/> with <paramref name="model"/>
@@ -276,39 +252,30 @@ public sealed class Matting : IDisposable
         catch { return false; }   // odd/invalid path — treat as not cached
     }
 
-    // One lock object per distinct output path. Without this, two concurrent
-    // re-mattes of the same image+model both pass the cache check, both run
-    // inference, and both try to write the same PNG (wasted work + a file-in-use
-    // race). Locking per cache path serializes only those; different images or
-    // models still run in parallel. The map is tiny (one object per result seen).
-    private static readonly ConcurrentDictionary<string, object> _cacheLocks = new();
-
     /// <summary>Returns the path of a matted PNG for <paramref name="source"/>, using the cache when possible.</summary>
     public string RemoveBackground(string source, bool force = false)
     {
-        string cached = CachePath(source);
+        // No self-locking here: single-writer safety rests on App._matteGate
+        // (a SemaphoreSlim(1,1)) serializing the only two callers — App.OpenStickers
+        // and App.RematteAsync — so exactly one RemoveBackground runs process-wide
+        // at a time and no two mattes ever race the same output path. A future
+        // caller that ran this OFF the gate would lose that guarantee, so keep all
+        // matting behind _matteGate.
+        string cached = CachePathFor(source, _model);
         if (File.Exists(cached) && !force)
             return cached;
 
-        lock (_cacheLocks.GetOrAdd(cached, _ => new object()))
-        {
-            // Re-check inside the lock: another thread may have produced it while
-            // we waited (only matters for the non-forced path).
-            if (File.Exists(cached) && !force)
-                return cached;
+        Directory.CreateDirectory(StickerPaths.CacheDir);
 
-            Directory.CreateDirectory(CacheDir);
+        var (pixels, w, h) = LoadBgra(source);
+        byte[] mask = Infer(pixels, w, h);
 
-            var (pixels, w, h) = LoadBgra(source);
-            byte[] mask = Infer(pixels, w, h);
+        // alpha = originalAlpha * mask
+        for (int i = 0; i < w * h; i++)
+            pixels[i * 4 + 3] = (byte)(pixels[i * 4 + 3] * mask[i] / 255);
 
-            // alpha = originalAlpha * mask
-            for (int i = 0; i < w * h; i++)
-                pixels[i * 4 + 3] = (byte)(pixels[i * 4 + 3] * mask[i] / 255);
-
-            SavePng(pixels, w, h, cached);
-            return cached;
-        }
+        SavePng(pixels, w, h, cached);
+        return cached;
     }
 
     /// <summary>
@@ -320,9 +287,9 @@ public sealed class Matting : IDisposable
     {
         int files = 0;
         long bytes = 0;
-        if (!Directory.Exists(CacheDir))
+        if (!Directory.Exists(StickerPaths.CacheDir))
             return (0, 0);
-        foreach (var path in Directory.EnumerateFiles(CacheDir, "*.png", SearchOption.TopDirectoryOnly))
+        foreach (var path in Directory.EnumerateFiles(StickerPaths.CacheDir, "*.png", SearchOption.TopDirectoryOnly))
         {
             try
             {
@@ -361,16 +328,32 @@ public sealed class Matting : IDisposable
     /// <summary>Runs the model; returns a per-pixel alpha mask at the original resolution.</summary>
     private byte[] Infer(byte[] pixels, int w, int h)
     {
-        int side = _spec.Size;
+        int side = _side;
 
         // --- preprocess: bilinear resize, RGB, (x/255 - mean) / std ---
+        // The x-axis sample mapping is the same for every row, so memoize it once
+        // rather than recomputing Sample() per column per row. Values are written
+        // straight to the tensor's contiguous NCHW buffer at c*plane + y*side + x —
+        // exactly the offset tensor[0,c,y,x] resolves to — skipping the multi-index
+        // indexer on this ~3M-element hot path. The bilinear expression is left
+        // byte-for-byte unchanged (float multiply isn't associative).
         var tensor = new DenseTensor<float>(new[] { 1, 3, side, side });
+        Span<float> dst = tensor.Buffer.Span;
+        int plane = side * side;
+
+        var sx0 = new int[side];
+        var sx1 = new int[side];
+        var sfx = new float[side];
+        for (int x = 0; x < side; x++)
+            (sx0[x], sx1[x], sfx[x]) = Sample(x, w, side);
+
         for (int y = 0; y < side; y++)
         {
             (int y0, int y1, float fy) = Sample(y, h, side);
             for (int x = 0; x < side; x++)
             {
-                (int x0, int x1, float fx) = Sample(x, w, side);
+                int x0 = sx0[x], x1 = sx1[x];
+                float fx = sfx[x];
                 for (int c = 0; c < 3; c++)
                 {
                     int b = 2 - c;  // tensor is RGB, pixels are BGRA
@@ -380,7 +363,7 @@ public sealed class Matting : IDisposable
                     float v11 = pixels[(y1 * w + x1) * 4 + b];
                     float v = v00 * (1 - fx) * (1 - fy) + v01 * fx * (1 - fy)
                             + v10 * (1 - fx) * fy + v11 * fx * fy;
-                    tensor[0, c, y, x] = (v / 255f - _spec.Mean[c]) / _spec.Std[c];
+                    dst[c * plane + y * side + x] = (v / 255f - _info.Mean[c]) / _info.Std[c];
                 }
             }
         }
@@ -388,32 +371,55 @@ public sealed class Matting : IDisposable
         // --- inference ---
         using var results = _session.Run(
             new[] { NamedOnnxValue.CreateFromTensor(_inputName, tensor) });
-        var output = results.First().AsTensor<float>();
 
         // --- postprocess: (sigmoid for logit-output models, then) min-max normalize ---
-        bool sigmoid = _model.StartsWith("birefnet");
+        // The output is single-channel, contiguous NCHW [1,1,side,side], so a linear
+        // walk over its backing buffer matches output[0,0,y,x] index-for-index.
+        var output = (DenseTensor<float>)results.First().AsTensor<float>();
+        ReadOnlySpan<float> outBuf = output.Buffer.Span;
+        bool sigmoid = _info.Sigmoid;
         var small = new float[side * side];
         float min = float.MaxValue, max = float.MinValue;
-        for (int y = 0; y < side; y++)
-            for (int x = 0; x < side; x++)
-            {
-                float v = output[0, 0, y, x];
-                if (sigmoid)
-                    v = 1f / (1f + MathF.Exp(-v));
-                small[y * side + x] = v;
-                if (v < min) min = v;
-                if (v > max) max = v;
-            }
+        for (int i = 0; i < small.Length; i++)
+        {
+            float v = outBuf[i];
+            if (sigmoid)
+                v = 1f / (1f + MathF.Exp(-v));
+            small[i] = v;
+            if (v < min) min = v;
+            if (v > max) max = v;
+        }
         float range = Math.Max(max - min, 1e-6f);
 
-        // --- bilinear resize mask back to original resolution ---
+        // --- bilinear resize mask back to original resolution, min-max normalized ---
+        return ResizeMaskToBytes(small, side, w, h, min, range);
+    }
+
+    /// <summary>
+    /// Bilinearly resize the <paramref name="side"/>×<paramref name="side"/>
+    /// <paramref name="small"/> mask up to <paramref name="w"/>×<paramref name="h"/>,
+    /// min-max normalizing (<c>(v-min)/range</c>) to bytes. Split out of
+    /// <see cref="Infer"/> — which needs a live ONNX session — so the resize geometry
+    /// can be unit-tested directly; in particular a y/x transpose is invisible on the
+    /// square preprocess path but would corrupt this non-square upscale (the common
+    /// real-world case). The x-axis mapping is loop-invariant so it's memoized once.
+    /// </summary>
+    internal static byte[] ResizeMaskToBytes(float[] small, int side, int w, int h, float min, float range)
+    {
         var mask = new byte[w * h];
+        var mx0 = new int[w];
+        var mx1 = new int[w];
+        var mfx = new float[w];
+        for (int x = 0; x < w; x++)
+            (mx0[x], mx1[x], mfx[x]) = Sample(x, side, w);
+
         for (int y = 0; y < h; y++)
         {
             (int y0, int y1, float fy) = Sample(y, side, h);
             for (int x = 0; x < w; x++)
             {
-                (int x0, int x1, float fx) = Sample(x, side, w);
+                int x0 = mx0[x], x1 = mx1[x];
+                float fx = mfx[x];
                 float v = small[y0 * side + x0] * (1 - fx) * (1 - fy)
                         + small[y0 * side + x1] * fx * (1 - fy)
                         + small[y1 * side + x0] * (1 - fx) * fy
@@ -425,7 +431,7 @@ public sealed class Matting : IDisposable
     }
 
     /// <summary>Bilinear sample positions mapping index i of a dstLen-sized axis onto a srcLen-sized source.</summary>
-    private static (int Lo, int Hi, float Frac) Sample(int i, int srcLen, int dstLen)
+    internal static (int Lo, int Hi, float Frac) Sample(int i, int srcLen, int dstLen)
     {
         float s = (i + 0.5f) * srcLen / dstLen - 0.5f;
         int lo = Math.Clamp((int)MathF.Floor(s), 0, srcLen - 1);
