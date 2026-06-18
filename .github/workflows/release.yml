@@ -37,8 +37,22 @@ jobs:
           /DPublishDir=..\publish-x64
           installer\Sticker.iss
 
+      - name: Installer SHA-256
+        id: hash
+        shell: pwsh
+        run: |
+          $exe = "installer/Output/StickerSetup-${{ steps.ver.outputs.version }}.exe"
+          $sha = (Get-FileHash $exe -Algorithm SHA256).Hash
+          "sha256=$sha" >> $env:GITHUB_OUTPUT
+          "Installer SHA-256: $sha" >> $env:GITHUB_STEP_SUMMARY
+
       - name: Create release
         uses: softprops/action-gh-release@v3
         with:
           files: installer/Output/StickerSetup-${{ steps.ver.outputs.version }}.exe
           generate_release_notes: true
+          append_body: true
+          # Surfaces the hash the winget manifest's InstallerSha256 needs, so it no
+          # longer has to be computed by hand after each release.
+          body: |
+            **Installer SHA-256:** `${{ steps.hash.outputs.sha256 }}`

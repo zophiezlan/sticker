@@ -1,0 +1,38 @@
+name: CI
+
+# Build both projects + run tests + check for drift on every push/PR to main.
+# (release.yml only fires on version tags and only publishes StickerApp, so without
+# this a break in StickerShell or the tests would go unnoticed until release time.)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Build (StickerApp + StickerShell + tests)
+        run: dotnet build Sticker.slnx -c Release
+
+      - name: Test
+        run: dotnet test Sticker.slnx -c Release --no-build
+
+      - name: Version consistency (csproj / installer / manifest)
+        shell: pwsh
+        run: ./tools/check-version.ps1
+
+      - name: Image-extension list consistency
+        shell: pwsh
+        run: ./tools/check-extensions.ps1
