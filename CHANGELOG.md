@@ -2,7 +2,7 @@
 
 All notable changes to Sticker are documented here.
 
-## [Unreleased]
+## [1.1.0] — 2026-06-19
 
 ### Added
 
