@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="StickerApp.Tests/StickerApp.Tests.csproj" />
+  <Project Path="StickerApp/StickerApp.csproj" />
+  <Project Path="StickerShell/StickerShell.csproj" />
+</Solution>
