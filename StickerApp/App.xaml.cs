@@ -98,14 +98,29 @@ public partial class App : Application
     private static string MattingKey(string model, bool forceCpu) =>
         forceCpu ? model + "|cpu" : model;
 
+    /// <summary>True for a GPU (non-forceCpu) session key — the inverse of the "|cpu" suffix MattingKey adds.</summary>
+    private static bool IsGpuKey(string key) => !key.EndsWith("|cpu");
+
+    /// <summary>
+    /// Dispose every warm GPU session, freeing its DirectML arena. CPU sessions
+    /// (plain RAM) are left alone. Caller MUST already hold <c>lock(_mattings)</c>;
+    /// the matte gate the caller holds (or try-acquires) is what guarantees none of
+    /// these is mid-Run.
+    /// </summary>
+    private void DisposeWarmGpuSessions()
+    {
+        foreach (var k in _mattings.Keys.Where(IsGpuKey).ToList())
+            if (_mattings.Remove(k, out var old))
+                old.Dispose();
+    }
+
     /// <summary>
     /// Heavy models (BiRefNet) run at 1024² and commit gigabytes; on DirectML the
     /// allocator's arena only grows and is never returned to the OS while the
     /// session lives. So heavy sessions are dropped as soon as a run finishes
     /// rather than kept warm — the light models (~180 MB) stay warm as before.
     /// </summary>
-    private static bool IsHeavyModel(string model) =>
-        model.StartsWith("birefnet", StringComparison.OrdinalIgnoreCase);
+    private static bool IsHeavyModel(string model) => Models.IsHeavy(model);
 
     private Matting GetMatting(string model, bool forceCpu = false)
     {
@@ -125,9 +140,7 @@ public partial class App : Application
             // RAM, used only for the VRAM fallback) are left untouched. _matteGate
             // serialises mattes, so nothing evicted here is one mid-Run.
             if (!forceCpu)
-                foreach (var k in _mattings.Keys.Where(k => !k.EndsWith("|cpu")).ToList())
-                    if (_mattings.Remove(k, out var old))
-                        old.Dispose();
+                DisposeWarmGpuSessions();
         }
 
         // Construct OUTSIDE the lock: a first-use download can take minutes and a
@@ -181,11 +194,7 @@ public partial class App : Application
         try
         {
             lock (app._mattings)
-            {
-                foreach (var key in app._mattings.Keys.Where(k => !k.EndsWith("|cpu")).ToList())
-                    if (app._mattings.Remove(key, out var m))
-                        m.Dispose();
-            }
+                app.DisposeWarmGpuSessions();
         }
         finally { _matteGate.Release(); }
     }
@@ -319,11 +328,13 @@ public partial class App : Application
             // Bitmap content (screenshots, copied web images)
             if (Clipboard.ContainsImage() && Clipboard.GetImage() is { } image)
             {
-                string dir = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                    ".sticker_cache", "clipboard");
+                string dir = StickerPaths.ClipboardDir;
                 Directory.CreateDirectory(dir);
-                string file = Path.Combine(dir, $"clip-{DateTime.Now:yyyyMMdd-HHmmss-fff}.png");
+                // GUID suffix: DateTime.Now resolves to ~10–15 ms, so two quick pastes
+                // could otherwise collide and overwrite a capture an open sticker still
+                // references (changing its mtime would also orphan its cached cutout).
+                string file = Path.Combine(dir,
+                    $"clip-{DateTime.Now:yyyyMMdd-HHmmss-fff}-{Guid.NewGuid():N}.png");
                 var encoder = new PngBitmapEncoder();
                 encoder.Frames.Add(BitmapFrame.Create(image));
                 using (var fs = File.Create(file))
@@ -356,9 +367,17 @@ public partial class App : Application
             WinForms.ToolTipIcon.Info);
     }
 
+    /// <summary>
+    /// The image extensions Sticker opens. The classic-menu installers
+    /// (install_context_menu.ps1, installer/Sticker.iss) and the MSIX manifest
+    /// (StickerShell/AppxManifest.xml) register this same set per-extension —
+    /// keep those in sync with this list.
+    /// </summary>
+    public static readonly string[] ImageExtensions =
+        { ".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif" };
+
     private static bool IsImageFile(string? path) =>
-        Path.GetExtension(path ?? "").ToLowerInvariant()
-            is ".jpg" or ".jpeg" or ".png" or ".webp" or ".bmp" or ".gif";
+        ImageExtensions.Contains(Path.GetExtension(path ?? "").ToLowerInvariant());
 
     /// <summary>
     /// Bound the clipboard-capture folder. Pasted screenshots/images are saved as
@@ -485,6 +504,34 @@ public partial class App : Application
             foreach (var w in Stickers)
                 w.SetPinned(false);
         });
+
+        // Per-sticker unpin. A pinned sticker is click-through (WS_EX_TRANSPARENT),
+        // so it can't reopen its own menu — without this the only way back is the
+        // all-or-nothing "Unpin all". Rebuilt on open since the pinned set changes;
+        // the submenu inherits the dark renderer so it matches the rest of the tray.
+        var unpinOne = new WinForms.ToolStripMenuItem("Unpin sticker");
+        unpinOne.DropDown.Renderer = menu.Renderer;
+        unpinOne.DropDown.ForeColor = menu.ForeColor;
+        unpinOne.DropDownOpening += (_, _) =>
+        {
+            unpinOne.DropDownItems.Clear();
+            var pinned = Stickers.Where(w => w.IsPinned).ToList();
+            if (pinned.Count == 0)
+            {
+                unpinOne.DropDownItems.Add(
+                    new WinForms.ToolStripMenuItem("(none pinned)") { Enabled = false });
+                return;
+            }
+            foreach (var w in pinned)
+            {
+                var target = w;   // capture per iteration
+                unpinOne.DropDownItems.Add(
+                    new WinForms.ToolStripMenuItem(Path.GetFileName(target.SourcePath),
+                        null, (_, _) => target.SetPinned(false)));
+            }
+        };
+        menu.Items.Add(unpinOne);
+
         menu.Items.Add("Close all stickers", null, (_, _) => CloseAll());
         menu.Items.Add("Clear matte cache…", null, (_, _) => ClearMatteCache());
         menu.Items.Add(new WinForms.ToolStripSeparator());
@@ -549,7 +596,8 @@ public partial class App : Application
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
             Multiselect = true,
-            Filter = "Images|*.jpg;*.jpeg;*.png;*.webp;*.bmp;*.gif|All files|*.*",
+            Filter = "Images|" + string.Join(";", ImageExtensions.Select(e => "*" + e))
+                     + "|All files|*.*",
         };
         if (dialog.ShowDialog() == true)
             OpenStickers(dialog.FileNames.ToList(), false, false);
@@ -627,14 +675,31 @@ public partial class App : Application
                             {
                                 Interlocked.Increment(ref _matteInFlight);
                                 try { return GetMatting(m).RemoveBackground(file); }
+                                catch
+                                {
+                                    // A run that fails part-way (e.g. a heavy model
+                                    // OOM-ing) otherwise leaves its session resident,
+                                    // squatting VRAM and failing every later sticker in
+                                    // this batch. Evict it so the next attempt starts
+                                    // clean — mirrors RematteAsync's failure handling.
+                                    // We hold _matteGate, so nothing is mid-Run here.
+                                    EvictMatting(m, forceCpu: false);
+                                    throw;
+                                }
                                 finally { Interlocked.Decrement(ref _matteInFlight); }
                             });
                         }
                         finally { _matteGate.Release(); }
+
+                        // The real download (if any) just finished — drop the notice.
+                        // Closing it here rather than after every iteration means a
+                        // restore that serves a cache hit first and only downloads on
+                        // a later cache miss still shows the notice across the actual
+                        // (possibly ~900 MB) fetch, instead of flashing it closed early.
+                        notice?.Close();
+                        notice = null;
                     }
                 }
-                notice?.Close();
-                notice = null;
 
                 var w = new StickerWindow(image, file, nm, state, usedModel);
                 Stickers.Add(w);
@@ -648,6 +713,12 @@ public partial class App : Application
                 MessageBox.Show($"Failed to open {p}:\n{ex.Message}", "Sticker");
             }
         }
+
+        // If the model file was missing yet every job turned out to be a cache hit
+        // (cutout cache and model store are independent), no download ran and the
+        // notice is still open — close it now so it can't dangle forever.
+        notice?.Close();
+        notice = null;
 
         // The batch above shares one warm session so a multi-sticker restore
         // doesn't reload the model per image; once it's done, release the heavy
@@ -669,7 +740,7 @@ public partial class App : Application
     public static string ActiveModel => ((App)Current)._model;
 
     /// <summary>Rough on-disk size of a model, for download notices.</summary>
-    private static int ModelSizeMb(string model) => model.StartsWith("birefnet") ? 900 : 180;
+    private static int ModelSizeMb(string model) => Models.For(model).ApproxMb;
 
     /// <summary>
     /// A small centred "downloading…" window. Models download lazily on first use,
@@ -891,7 +962,12 @@ public partial class App : Application
                         0, 0, security);
                     await server.WaitForConnectionAsync();
                     using var reader = new StreamReader(server, Encoding.UTF8);
-                    string? line = await reader.ReadLineAsync();
+                    // Bound the read: a client that connects but never sends a newline
+                    // would otherwise pin this single-instance listener forever and
+                    // starve the next real handoff. 5s is ample — the legitimate client
+                    // writes its (possibly multi-path) line and flushes immediately.
+                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                    string? line = await reader.ReadLineAsync(cts.Token);
                     if (string.IsNullOrWhiteSpace(line))
                         continue;
                     var msg = JsonSerializer.Deserialize<HandoffMessage>(line);

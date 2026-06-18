@@ -2,6 +2,61 @@
 
 All notable changes to Sticker are documented here.
 
+## [Unreleased]
+
+### Added
+
+- **Arrow-key nudging.** With a sticker focused, the arrow keys move it 1 pixel
+  at a time (hold Shift for ~10) — fine positioning the mouse can't do.
+- **Per-sticker unpin.** The tray now has an **"Unpin sticker"** submenu listing
+  each pinned sticker by name, so you can release just one. (A pinned sticker is
+  click-through and can't reopen its own menu, so previously the only way back
+  was the all-or-nothing "Unpin all stickers".)
+- **Right-clicking a sticker now focuses it**, so the keyboard shortcuts keep
+  working after you've clicked away to another window.
+- **The right-click menu shows a scroll-gesture legend** (resize · opacity ·
+  fine resize), which previously had no on-screen hint.
+- **The `+` / `-` resize keys now honor Ctrl for fine steps** (5% instead of
+  15%), matching Ctrl + scroll-wheel resize and what the README already
+  documented.
+
+### Fixed
+
+- **A failed matte on the open/restore path no longer poisons the rest of the
+  batch.** If a model ran out of GPU memory while opening (or restoring)
+  several images at once, its half-loaded session used to stay resident and
+  every following sticker in that batch failed too. The session is now evicted
+  on failure — matching the re-matte path — so the next attempt starts clean.
+- **A sticker could "stick" to the cursor** after the mouse capture was lost
+  mid-drag — e.g. Alt+Tab, or pressing `S` (save) while dragging. Drag state is
+  now reset when capture is lost, so the next mouse move no longer teleports it.
+- **The "downloading model" notice no longer flashes shut** during `--resume`
+  when a cached cutout is restored before a model still needs downloading; it
+  now stays up across the actual download instead of closing on the first
+  cache hit.
+- **Picking a second matting model while one is still running is now ignored**,
+  so the on-sticker busy spinner can't clear while inference is still going.
+- **`--resume` no longer forgets a sticker's model** when its cached cutout is
+  missing. Previously the restore fell back to the default model *and* wrote that
+  default back to `session.json`, permanently losing the original choice; the
+  intended model is now preserved, so a later restore reuses it once the cutout
+  is cached again.
+- **Closing a sticker mid-drag** (Esc, middle-click) no longer races the drag
+  handler into a spurious "Something went wrong" notification.
+- **Clipboard captures can't collide.** Pasted images now get a unique suffix, so
+  two pastes in the same millisecond can't overwrite each other (which would have
+  orphaned an open sticker's cached cutout).
+- **The single-instance handoff read is now time-bounded**, so a stray client that
+  connects without sending data can't pin the listener and block "Open as sticker".
+
+### Internal
+
+- **Added a test suite and CI.** A small xUnit project covers the contract-critical
+  pure logic (matte cache-key derivation, tolerant session parsing, the bilinear
+  resize mapping, and the model registry), and a CI workflow now builds both
+  projects, runs the tests, and guards against version drift (csproj/installer/
+  manifest) and image-extension-list drift on every push and PR.
+
 ## [1.0.4] — 2026-06-14
 
 ### Added
@@ -49,7 +104,7 @@ All notable changes to Sticker are documented here.
   (laptop iGPU + discrete GPU, or a desktop with the iGPU enabled) use the right
   card automatically. Override with `STICKER_DML_DEVICE` if needed.
 - **CPU fallback for heavy models.** When a model runs out of GPU memory — during
-  inference *or* while loading — Sticker first frees other warm GPU sessions and
+  inference _or_ while loading — Sticker first frees other warm GPU sessions and
   retries on the GPU, then offers to retry on the CPU (same result, slower) before
   giving up. `STICKER_FORCE_CPU=1` always skips the GPU.
 - **`STICKER_BIREFNET_SIZE`** to lower BiRefNet's input resolution (e.g. `768`,
@@ -67,7 +122,7 @@ All notable changes to Sticker are documented here.
 ### Changed
 
 - **Context menu now covers all supported image types** (`.jpg .jpeg .png .webp
-  .bmp .gif`). Previously it registered under the `image` PerceivedType, which
+.bmp .gif`). Previously it registered under the `image` PerceivedType, which
   `.webp` (and others) often lack — so it only appeared for `.jpg`. It's now
   registered per extension.
 - README: rewritten GPU / troubleshooting guidance, a full environment-variable

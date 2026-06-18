@@ -49,4 +49,10 @@
     <Content Include="app.ico" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Let the test project reach internal helpers (CacheFileName, Session.Parse,
+         Matting.Sample, the Models registry) without making them public API. -->
+    <InternalsVisibleTo Include="StickerApp.Tests" />
+  </ItemGroup>
+
 </Project>

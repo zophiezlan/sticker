@@ -40,6 +40,21 @@ if (-not (Test-Path "$publish\StickerShell.comhost.dll")) {
 Copy-Item "$root\StickerShell\AppxManifest.xml" $publish -Force
 Copy-Item "$root\StickerApp\app.png" $publish -Force
 
+# Sync the sparse package's Identity version with the app (csproj <Version>) so a
+# rebuilt dev package isn't stuck at a stale hand-edited value. MSIX requires a
+# 4-part Major.Minor.Build.Revision while csproj is 3-part, so append ".0". This
+# patches the *copy* in publish\ only; the shipped release is the Inno .exe and
+# never touches AppxManifest.xml, so this is purely dev-tooling hygiene.
+$ver = ([xml](Get-Content "$root\StickerApp\StickerApp.csproj")).Project.PropertyGroup.Version |
+    Where-Object { $_ } | Select-Object -First 1
+if ($ver) {
+    $manifestCopy = Join-Path $publish "AppxManifest.xml"
+    $xml = [xml](Get-Content $manifestCopy)
+    $xml.Package.Identity.Version = "$ver.0"
+    $xml.Save($manifestCopy)
+    Write-Host "Set sparse-package Identity version to $ver.0 (from csproj)."
+}
+
 # Re-register (registration pins the manifest in place; refresh after rebuilds)
 $existing = Get-AppxPackage -Name $pkgName -ErrorAction SilentlyContinue
 if ($existing) { $existing | Remove-AppxPackage }

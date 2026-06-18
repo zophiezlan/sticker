@@ -25,6 +25,12 @@ public partial class StickerWindow : Window
     // and the "re-process" action. Starts as the app default used at open time.
     private string _currentModel = App.ActiveModel;
 
+    // The model intent persisted to session.json. Usually equals _currentModel, but
+    // on a --resume cache-miss the *shown* cutout falls back to the default while
+    // this preserves the model the sticker was originally matted with, so a later
+    // restore (once that cutout is cached again) reuses it instead of the fallback.
+    private string? _recordedModel;
+
     private BitmapImage _matted;
     private BitmapImage? _original;
     private bool _showingOriginal;
@@ -33,6 +39,7 @@ public partial class StickerWindow : Window
     private double _rotation;
     private bool _flipped;
     private bool _pinned;
+    private bool _rematting;   // guards Rematte against reentrant model picks
 
     private MenuItem? _toggleItem;
 
@@ -46,7 +53,12 @@ public partial class StickerWindow : Window
         _sourcePath = sourcePath;
         _noMatte = noMatte;
         if (!string.IsNullOrEmpty(matteModel))
-            _currentModel = matteModel;   // the model that actually produced this matte
+            _currentModel = matteModel;   // the model that actually produced the shown cutout
+        // Persist the *intended* model: on a --resume cache-miss the shown cutout is
+        // the fallback default (matteModel), but state.Model still holds what this
+        // sticker was originally matted with — keep recording that so the preference
+        // survives. New stickers record what they were matted with.
+        _recordedModel = state?.Model is { Length: > 0 } intent ? intent : matteModel;
 
         _matted = LoadBitmap(imagePath);
         Img.Source = _matted;
@@ -71,9 +83,7 @@ public partial class StickerWindow : Window
         if (state is not null)
         {
             // Rescue stickers whose monitor was unplugged or resolution changed.
-            double rad = _rotation * Math.PI / 180;
-            double bw = Math.Abs(Img.Width * Math.Cos(rad)) + Math.Abs(Img.Height * Math.Sin(rad));
-            double bh = Math.Abs(Img.Width * Math.Sin(rad)) + Math.Abs(Img.Height * Math.Cos(rad));
+            var (bw, bh) = RotatedBounds(Img.Width, Img.Height, _rotation);
             (Left, Top) = ClampToVirtualScreen(state.X, state.Y, bw, bh);
         }
         else
@@ -100,6 +110,14 @@ public partial class StickerWindow : Window
         return (x, y);
     }
 
+    /// <summary>Axis-aligned bounding box (width, height) of a w×h rectangle rotated by <paramref name="degrees"/>.</summary>
+    private static (double W, double H) RotatedBounds(double w, double h, double degrees)
+    {
+        double rad = degrees * Math.PI / 180;
+        return (Math.Abs(w * Math.Cos(rad)) + Math.Abs(h * Math.Sin(rad)),
+                Math.Abs(w * Math.Sin(rad)) + Math.Abs(h * Math.Cos(rad)));
+    }
+
     public StickerState CaptureState() => new()
     {
         Source = _sourcePath,
@@ -112,7 +130,7 @@ public partial class StickerWindow : Window
         Opacity = Opacity,
         OnTop = Topmost,
         Pinned = _pinned,
-        Model = _noMatte ? null : _currentModel,
+        Model = _noMatte ? null : (_recordedModel ?? _currentModel),
     };
 
     // --- pin (click-through) ---
@@ -121,6 +139,9 @@ public partial class StickerWindow : Window
     [DllImport("user32.dll")] private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
     private const int GWL_EXSTYLE = -20;
     private const int WS_EX_TRANSPARENT = 0x20;
+
+    /// <summary>True while this sticker is pinned (click-through). Drives the tray's per-sticker unpin list.</summary>
+    public bool IsPinned => _pinned;
 
     /// <summary>Pinned stickers ignore the mouse entirely. Unpin via the tray menu.</summary>
     public void SetPinned(bool pinned)
@@ -203,9 +224,15 @@ public partial class StickerWindow : Window
         base.OnMouseMove(e);
         if (!_dragging)
             return;
+        // If the window was closed mid-drag (Esc, middle-click, programmatic Close),
+        // its visual loses its PresentationSource while a dispatched move may still be
+        // queued. PointToScreen would then throw and pop a spurious error balloon, so
+        // bail once the source is gone. (Check BEFORE PointToScreen — that's the throw
+        // site — not just the CompositionTarget deref below.)
+        if (PresentationSource.FromVisual(this) is not { } source)
+            return;
         var devicePos = PointToScreen(e.GetPosition(this));
-        var dipPos = PresentationSource.FromVisual(this)!
-            .CompositionTarget!.TransformFromDevice.Transform(devicePos);
+        var dipPos = source.CompositionTarget!.TransformFromDevice.Transform(devicePos);
         Left = dipPos.X - _grabOffset.X;
         Top = dipPos.Y - _grabOffset.Y;
     }
@@ -221,11 +248,33 @@ public partial class StickerWindow : Window
         }
     }
 
+    /// <summary>
+    /// Capture can be revoked without a left-button-up — Alt+Tab, a modal dialog
+    /// (e.g. the Save dialog from 'S' pressed mid-drag), or another window taking
+    /// the foreground. Clear the drag flag so the next mouse-move doesn't teleport
+    /// the sticker to follow a button-up cursor. No-ops on a normal release, which
+    /// already clears _dragging before releasing capture.
+    /// </summary>
+    protected override void OnLostMouseCapture(MouseEventArgs e)
+    {
+        base.OnLostMouseCapture(e);
+        if (_dragging)
+        {
+            _dragging = false;
+            App.SaveSession();
+        }
+    }
+
     protected override void OnMouseDown(MouseButtonEventArgs e)
     {
         base.OnMouseDown(e);
         if (e.ChangedButton == MouseButton.Middle)
             Close();
+        else if (e.ChangedButton == MouseButton.Right)
+            // Borderless, ShowInTaskbar=False overlays only get keyboard focus when
+            // clicked. Take focus on right-click so the R/F/S/D/+/-/arrow shortcuts
+            // keep working after the context menu closes (and after focusing another app).
+            Activate();
     }
 
     protected override void OnMouseWheel(MouseWheelEventArgs e)
@@ -239,12 +288,16 @@ public partial class StickerWindow : Window
         }
         else
         {
-            double factor = Keyboard.Modifiers.HasFlag(ModifierKeys.Control) ? 1.05 : 1.15;
+            double factor = ResizeStep();
             _scale *= up ? factor : 1 / factor;
             ApplyVisuals(keepCenter: true);
         }
         e.Handled = true;
     }
+
+    /// <summary>Resize multiplier per step: a fine 1.05 when Ctrl is held, else 1.15. Shared by the wheel and the +/- keys.</summary>
+    private static double ResizeStep() =>
+        Keyboard.Modifiers.HasFlag(ModifierKeys.Control) ? 1.05 : 1.15;
 
     // --- keyboard ---
 
@@ -258,11 +311,11 @@ public partial class StickerWindow : Window
                 Close();
                 break;
             case Key.OemPlus or Key.Add:
-                _scale *= 1.15;
+                _scale *= ResizeStep();   // Ctrl = fine step, matching the wheel
                 ApplyVisuals(keepCenter: true);
                 break;
             case Key.OemMinus or Key.Subtract:
-                _scale /= 1.15;
+                _scale /= ResizeStep();
                 ApplyVisuals(keepCenter: true);
                 break;
             case Key.R:
@@ -277,7 +330,29 @@ public partial class StickerWindow : Window
             case Key.S:
                 SaveCutout();
                 break;
+            case Key.Left or Key.Right or Key.Up or Key.Down:
+                Nudge(e.Key, shift);
+                e.Handled = true;   // don't let arrows bubble to default focus navigation
+                break;
         }
+    }
+
+    /// <summary>
+    /// Arrow-key fine positioning — 1 DIP per press, 10 with Shift. Mouse drag is the
+    /// only other move path (and deliberately bypasses the OS move loop), so this is
+    /// the keyboard equivalent. Position only: no scale/rotation, so no ApplyVisuals.
+    /// </summary>
+    private void Nudge(Key key, bool shift)
+    {
+        double step = shift ? 10 : 1;
+        switch (key)
+        {
+            case Key.Left: Left -= step; break;
+            case Key.Right: Left += step; break;
+            case Key.Up: Top -= step; break;
+            case Key.Down: Top += step; break;
+        }
+        App.SaveSession();
     }
 
     // --- actions ---
@@ -320,9 +395,7 @@ public partial class StickerWindow : Window
         // Render the full-resolution matte with current flip/rotation applied.
         var src = _matted;
         double w = src.PixelWidth, h = src.PixelHeight;
-        double rad = _rotation * Math.PI / 180;
-        double bw = Math.Abs(w * Math.Cos(rad)) + Math.Abs(h * Math.Sin(rad));
-        double bh = Math.Abs(w * Math.Sin(rad)) + Math.Abs(h * Math.Cos(rad));
+        var (bw, bh) = RotatedBounds(w, h, _rotation);
 
         var visual = new DrawingVisual();
         using (var dc = visual.RenderOpen())
@@ -348,6 +421,16 @@ public partial class StickerWindow : Window
 
     private async void Rematte(string? model = null, bool force = false)
     {
+        // Ignore a second model pick / re-process while one is already running.
+        // Both would serialize on _matteGate, but each Rematte runs its own finally,
+        // so the first to finish would clear the shared busy spinner + wait cursor
+        // while the second is still inferring behind the gate — the window would look
+        // idle mid-matte. One at a time keeps the spinner and _currentModel coherent
+        // and avoids redundant inference. The flag also covers the GPU-OOM prompt
+        // inside RematteWithFallback, so a second matte can't launch while it's up.
+        if (_rematting)
+            return;
+        _rematting = true;
         Mouse.OverrideCursor = Cursors.Wait;
         SetBusy(true);
         try
@@ -362,6 +445,7 @@ public partial class StickerWindow : Window
         {
             Mouse.OverrideCursor = null;
             SetBusy(false);
+            _rematting = false;
         }
     }
 
@@ -436,7 +520,12 @@ public partial class StickerWindow : Window
             Img.Source = _matted;
         ApplyVisuals(keepCenter: true);
         if (model != null)
-            _currentModel = model;   // track the active model for the menu/checkmark
+        {
+            // The user actively chose this model: it's now both what's shown and the
+            // recorded intent, superseding any prior --resume fallback preference.
+            _currentModel = model;
+            _recordedModel = model;
+        }
     }
 
     // --- context menu ---
@@ -444,6 +533,17 @@ public partial class StickerWindow : Window
     private void BuildContextMenu()
     {
         var menu = new ContextMenu();
+
+        // Legend for the wheel gestures, which have no other menu/keyboard surface.
+        // Disabled so it's a non-interactive hint (dimmed via App.xaml's IsEnabled
+        // trigger). The keyboard moves — arrows, R/F/S/D, +/- — appear as gesture
+        // text on their own items below.
+        menu.Items.Add(new MenuItem
+        {
+            Header = "Scroll: resize   ·   Shift+scroll: opacity   ·   Ctrl+scroll: fine",
+            IsEnabled = false,
+        });
+        menu.Items.Add(new Separator());
 
         var onTop = new MenuItem
         {
@@ -482,9 +582,8 @@ public partial class StickerWindow : Window
             // first if needed — BiRefNet is ~900 MB), then it's cached too.
             // "Re-process" forces a fresh run of the current model, ignoring cache.
             menu.Items.Add(new Separator());
-            AddModelChoice(menu.Items, "Matte: ISNet — general (default)", "isnet-general-use");
-            AddModelChoice(menu.Items, "Matte: U2Net — people & portraits", "u2net_human_seg");
-            AddModelChoice(menu.Items, "Matte: BiRefNet — best (slow)", "birefnet-general");
+            foreach (var info in Models.Pickable)
+                AddModelChoice(menu.Items, info.MenuLabel, info.Id);
             AddItem(menu, "Re-process current (ignore cache)", "", () => Rematte(_currentModel, force: true));
 
             // Checkmarks are set at build time; refresh them to the active model

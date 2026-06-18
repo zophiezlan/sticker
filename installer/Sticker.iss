@@ -57,7 +57,7 @@ Name: "{userstartup}\Sticker"; Filename: "{app}\Sticker.exe"; Parameters: "--res
 ; Classic context menu: right-click an image -> (Show more options on Win11) -> Open as sticker.
 ; Registered per file extension rather than under the "image" PerceivedType, because
 ; PerceivedType is set inconsistently (e.g. .webp usually lacks it), which made the
-; entry appear for .jpg only. Keep this list in sync with App.IsImageFile.
+; entry appear for .jpg only. Keep this list in sync with App.ImageExtensions.
 Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.jpg\shell\OpenAsSticker"; ValueType: string; ValueData: "Open as sticker"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.jpg\shell\OpenAsSticker"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\Sticker.exe"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.jpg\shell\OpenAsSticker\command"; ValueType: string; ValueData: """{app}\Sticker.exe"" ""%1"""; Flags: uninsdeletekey
