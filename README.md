@@ -38,7 +38,7 @@ Either way it's a per-user install (no admin needed) and adds **"Open as sticker
 
 > ⚠️ **"Windows protected your PC"?** If you run the downloaded installer directly, Windows **SmartScreen** may warn you — Sticker isn't code-signed yet (it's a solo project and signing certificates are pricey), and SmartScreen warns on _any_ new unsigned app regardless of what it does, so this is expected and harmless. Click **More info → Run anyway**. (winget verifies the installer against a pinned SHA-256 and usually installs without that prompt.) Every release is built in the open by [GitHub Actions](https://github.com/zophiezlan/sticker/actions) straight from this source, so you can verify exactly what's in it — and the prompt fades as more people install. (This is a reputation prompt, not a virus warning; Windows Defender is happy with it.)
 
-<a name="build-from-source"></a>### Build from source
+### <a name="build-from-source"></a> Build from source
 
 **You'll need:** Windows 11 • [.NET 10 SDK](https://dotnet.microsoft.com/download) • Developer Mode turned on (Settings → System → For developers)
 
@@ -163,7 +163,7 @@ sticker/
 | **Heavy model fails, then lighter models fail too** | Fixed in current builds — a failed session used to hold its VRAM. Update; if on an old build, restart Sticker to clear it.                                                                                                           |
 | **"Start with Windows" won't stick**                | Check the shortcut exists — see [autostart](#autostart) below                                                                                                                                                                        |
 
-<a name="context-menu-placement"></a>### Context menu placement (top-level vs. "Show more options")
+### <a name="context-menu-placement"></a> Context menu placement (top-level vs. "Show more options")
 
 Sticker can install its right-click entry two different ways, and which one you get depends on how you installed:
 
@@ -184,7 +184,7 @@ This is a limitation of _not being signed_, not a deliberate choice — both men
 
 If you've installed the `.exe` and want the top-level entry too, you can run `setup_modern_menu.ps1` alongside it; the two registrations are independent (you'd then see both entries until you remove one).
 
-<a name="gpu-selection-hybrid-graphics"></a>### GPU selection (hybrid graphics)
+### <a name="gpu-selection-hybrid-graphics"></a> GPU selection (hybrid graphics)
 
 Sticker **auto-selects the highest-VRAM adapter** for DirectML, so hybrid-graphics machines should use the discrete GPU without any setup. (Earlier builds blindly used DXGI adapter 0 — and _whichever GPU drives your primary display is normally adapter 0_ — so on switchable-graphics systems they'd land on a low-memory integrated GPU and heavy models would OOM while the real card sat idle. That's now handled automatically.)
 
