@@ -1,21 +1,23 @@
-# <img src="https://github.com/zophiezlan/sticker/blob/main/StickerApp/app.png" width="30" alt="Logo"> Sticker
-
+<div align="center">
+  
+[![Sticker][repo_logo_img]][repo_url]
+# Sticker
 **Turn any image into a floating desktop sticker with the background magically removed**
 
 ![Latest release](https://img.shields.io/github/v/release/zophiezlan/sticker?label=Latest)
 ![WinGet Package Version](https://img.shields.io/winget/v/Zophie.Sticker?label=Winget)
 ![CI Workflow Status](https://img.shields.io/github/actions/workflow/status/zophiezlan/sticker/.github%2Fworkflows%2Fci.yml?label=CI)
 ![Release Workflow Status](https://img.shields.io/github/actions/workflow/status/zophiezlan/sticker/.github%2Fworkflows%2Frelease.yml?label=Release)
-![GitHub License](https://img.shields.io/github/license/zophiezlan/sticker)
+![License](https://img.shields.io/github/license/zophiezlan/sticker)
+</div>
 
 ---
 
 ## ✨ Why Sticker?
-
 |                                |                                                                                                                     |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
 | 🖱️ **One click**               | Right-click any image → Open as sticker. No extra apps, no export steps.                                            |
-| 🧠 **AI-powered**              | Background removal runs 100% locally on your GPU (or CPU). No uploads, no API keys, no internet needed after setup. |
+| 🧠 **AI-powered**              | Background removal runs 100% locally on your GPU (or CPU).                                                          |
 | 👻 **Click-through**           | Transparent areas are truly transparent — your mouse passes right through to whatever's underneath.                 |
 | 💾 **Remembers everything**    | Close your laptop, reboot, whatever — your stickers come back exactly where you left them.                          |
 | ⚡ **Instant after first use** | The AI model stays warm in a tiny tray app. Second sticker onwards? Sub-second.                                     |
@@ -24,21 +26,19 @@
 
 ## 🚀 Get Started
 
-### Install the app (recommended)
-
-**Winget** or grab the [the latest release](https://github.com/zophiezlan/sticker/releases/latest).
+### Install the app via winget
 
 ```powershell
 winget install Zophie.Sticker
 ```
 
-Either way it's a per-user install (no admin needed) and adds **"Open as sticker"** to your right-click menu automatically — under **"Show more options"** on Windows 11.
+OR grab the **[latest release](https://github.com/zophiezlan/sticker/releases/latest)**
 
-> 🪟 **Why "Show more options" and not the top-level menu?** Putting an entry in the Win11 top-level menu requires a _signed_ app package (MSIX). Sticker isn't code-signed yet, so the installer registers the older "classic" menu verb instead — which Win11 tucks under "Show more options". It works identically, just one extra click. If you want the top-level entry, [build from source](#build-from-source) with `setup_modern_menu.ps1` (it registers an unsigned package, which needs Developer Mode). See [Context menu placement](#context-menu-placement) for the full story.
+### <strong name="build-from-source"></strong> Build from source
+> Every release is built in the open by [GitHub Actions](https://github.com/zophiezlan/sticker/actions) straight from this source, so you can verify exactly what's in it.
 
-> ⚠️ **"Windows protected your PC"?** If you run the downloaded installer directly, Windows **SmartScreen** may warn you — Sticker isn't code-signed yet (it's a solo project and signing certificates are pricey), and SmartScreen warns on _any_ new unsigned app regardless of what it does, so this is expected and harmless. Click **More info → Run anyway**. (winget verifies the installer against a pinned SHA-256 and usually installs without that prompt.) Every release is built in the open by [GitHub Actions](https://github.com/zophiezlan/sticker/actions) straight from this source, so you can verify exactly what's in it — and the prompt fades as more people install. (This is a reputation prompt, not a virus warning; Windows Defender is happy with it.)
-
-### <a name="build-from-source"></a> Build from source
+<details>
+<summary>Click to expand</summary>
 
 **You'll need:** Windows 11 • [.NET 10 SDK](https://dotnet.microsoft.com/download) • Developer Mode turned on (Settings → System → For developers)
 
@@ -64,6 +64,8 @@ The first time you create a sticker, the AI model downloads automatically (~180 
 To uninstall, run `.\setup_modern_menu.ps1 -Uninstall`.
 
 > 🧪 **Contributing?** `dotnet test Sticker.slnx` builds both projects and runs the unit tests (matte cache-key derivation, tolerant session parsing, the bilinear resize math, and the model registry). CI runs the same on every push/PR, and also checks that the version and the supported-image-extension list stay consistent across the installers and the MSIX manifest.
+
+</details>   
 
 ---
 
@@ -270,3 +272,6 @@ The shortcut launches `Sticker.exe --resume`. To toggle it: use the tray menu's 
 ## 📄 License
 
 [MIT](LICENSE) — © 2026 Zophie
+
+[repo_logo_img]: https://github.com/zophiezlan/sticker/blob/main/StickerApp/app.png
+[repo_url]: [https://github.com/create-go-app/cli](https://github.com/zophiezlan/sticker)
