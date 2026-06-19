@@ -1,8 +1,12 @@
 # <img src="https://github.com/zophiezlan/sticker/blob/main/StickerApp/app.png" width="30" alt="Logo"> Sticker
 
-**Turn any image into a floating desktop sticker — background magically removed, in one right-click.**
+**Turn any image into a floating desktop sticker with the background magically removed**
 
-> Right-click a photo in Explorer → _Open as sticker_ → boom, the subject peels off and hovers on your desktop. Drag it anywhere. It clicks through the transparent parts. It survives reboots. It's just… fun.
+![Latest release](https://img.shields.io/github/v/release/zophiezlan/sticker?label=Latest)
+![WinGet Package Version](https://img.shields.io/winget/v/Zophie.Sticker?label=Winget)
+![CI Workflow Status](https://img.shields.io/github/actions/workflow/status/zophiezlan/sticker/.github%2Fworkflows%2Fci.yml?label=CI)
+![Release Workflow Status](https://img.shields.io/github/actions/workflow/status/zophiezlan/sticker/.github%2Fworkflows%2Frelease.yml?label=Release)
+![GitHub License](https://img.shields.io/github/license/zophiezlan/sticker)
 
 ---
 
@@ -22,13 +26,11 @@
 
 ### Install the app (recommended)
 
-Sticker is now on winget:
+**Winget** or grab the [the latest release](https://github.com/zophiezlan/sticker/releases/latest).
 
 ```powershell
 winget install Zophie.Sticker
 ```
-
-Alternatively, grab the installer directly from [the latest release](https://github.com/zophiezlan/sticker/releases/latest) — these releases may be newer than the winget manifest.
 
 Either way it's a per-user install (no admin needed) and adds **"Open as sticker"** to your right-click menu automatically — under **"Show more options"** on Windows 11.
 
