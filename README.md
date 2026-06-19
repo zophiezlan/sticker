@@ -1,4 +1,4 @@
-![Logo](https://github.com/zophiezlan/sticker/blob/main/StickerApp/app.png️)
+![Logo](StickerApp/app.png️)
 
 # Sticker
 
