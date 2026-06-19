@@ -28,13 +28,11 @@ Sticker is now on winget:
 winget install Zophie.Sticker
 ```
 
-For the very newest build, grab the installer directly from [the latest release](https://github.com/zophiezlan/sticker/releases/latest) — the winget manifest can trail GitHub by a version or two (see below).
+Alternatively, grab the installer directly from [the latest release](https://github.com/zophiezlan/sticker/releases/latest) — these releases may be newer than the winget manifest.
 
 Either way it's a per-user install (no admin needed) and adds **"Open as sticker"** to your right-click menu automatically — under **"Show more options"** on Windows 11.
 
 > 🪟 **Why "Show more options" and not the top-level menu?** Putting an entry in the Win11 top-level menu requires a _signed_ app package (MSIX). Sticker isn't code-signed yet, so the installer registers the older "classic" menu verb instead — which Win11 tucks under "Show more options". It works identically, just one extra click. If you want the top-level entry, [build from source](#build-from-source) with `setup_modern_menu.ps1` (it registers an unsigned package, which needs Developer Mode). See [Context menu placement](#context-menu-placement) for the full story.
-
-> 📦 **winget can trail the latest release.** Sticker is in the official winget repo as `Zophie.Sticker` — the initial submission, [microsoft/winget-pkgs#387213](https://github.com/microsoft/winget-pkgs/pull/387213), merged for **v1.0.2**. Each new version ships as its own PR there, so the published manifest can lag the newest [GitHub release](https://github.com/zophiezlan/sticker/releases/latest) by a version or two. If `winget install` gives you an older build than the latest release, grab the installer above for the newest — or run `winget upgrade Zophie.Sticker` once the manifest catches up. The vendored manifest under `winget/` mirrors what's published.
 
 > ⚠️ **"Windows protected your PC"?** If you run the downloaded installer directly, Windows **SmartScreen** may warn you — Sticker isn't code-signed yet (it's a solo project and signing certificates are pricey), and SmartScreen warns on _any_ new unsigned app regardless of what it does, so this is expected and harmless. Click **More info → Run anyway**. (winget verifies the installer against a pinned SHA-256 and usually installs without that prompt.) Every release is built in the open by [GitHub Actions](https://github.com/zophiezlan/sticker/actions) straight from this source, so you can verify exactly what's in it — and the prompt fades as more people install. (This is a reputation prompt, not a virus warning; Windows Defender is happy with it.)
 
