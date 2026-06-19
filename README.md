@@ -1,4 +1,4 @@
-# ✂️ Sticker
+# [Logo](https://github.com/zophiezlan/sticker/blob/main/StickerApp/app.png️) Sticker
 
 **Turn any image into a floating desktop sticker — background magically removed, in one right-click.**
 
