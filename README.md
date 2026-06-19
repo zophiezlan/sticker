@@ -1,6 +1,4 @@
-![Logo](StickerApp/app.png️)
-
-# Sticker
+# <img src="https://github.com/zophiezlan/sticker/blob/main/StickerApp/app.png" width="30" alt="Logo"> Sticker
 
 **Turn any image into a floating desktop sticker — background magically removed, in one right-click.**
 
