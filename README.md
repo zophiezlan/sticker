@@ -4,11 +4,11 @@
 # Sticker
 **Turn any image into a floating desktop sticker with the background magically removed**
 
-![Latest release](https://img.shields.io/github/v/release/zophiezlan/sticker?label=Latest)
-![WinGet Package Version](https://img.shields.io/winget/v/Zophie.Sticker?label=Winget)
-![CI Workflow Status](https://img.shields.io/github/actions/workflow/status/zophiezlan/sticker/.github%2Fworkflows%2Fci.yml?label=CI)
-![Release Workflow Status](https://img.shields.io/github/actions/workflow/status/zophiezlan/sticker/.github%2Fworkflows%2Frelease.yml?label=Release)
-![License](https://img.shields.io/github/license/zophiezlan/sticker)
+![Latest release][release_shield]
+![WinGet Package Version][winget_shield]
+![CI Workflow Status][ci_status_shield]
+![Release Workflow Status][release_status_shield]
+![License][license_shield]
 </div>
 
 ---
@@ -18,9 +18,9 @@
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
 | 🖱️ **One click**               | Right-click any image → Open as sticker. No extra apps, no export steps.                                            |
 | 🧠 **AI-powered**              | Background removal runs 100% locally on your GPU (or CPU).                                                          |
-| 👻 **Click-through**           | Transparent areas are truly transparent — your mouse passes right through to whatever's underneath.                 |
-| 💾 **Remembers everything**    | Close your laptop, reboot, whatever — your stickers come back exactly where you left them.                          |
-| ⚡ **Instant after first use** | The AI model stays warm in a tiny tray app. Second sticker onwards? Sub-second.                                     |
+| 👻 **Click-through**           | Click pass-through on transparent layers.               |
+| 💾 **Remembers everything**    | Close your laptop, reboot, whatever - stickers come back where you left them.                          |
+| ⚡ **Instant after first use** | The AI model stays warm in a tiny tray app.                                     |
 
 ---
 
@@ -32,10 +32,10 @@
 winget install Zophie.Sticker
 ```
 
-OR grab the **[latest release](https://github.com/zophiezlan/sticker/releases/latest)**
+OR grab the **[latest release][latest_release]**
 
 ### <strong name="build-from-source"></strong> Build from source
-> Every release is built in the open by [GitHub Actions](https://github.com/zophiezlan/sticker/actions) straight from this source, so you can verify exactly what's in it.
+> Every release is built in the open by [GitHub Actions][actions] straight from this source, so you can verify exactly what's in it.
 
 <details>
 <summary>Click to expand</summary>
@@ -274,4 +274,11 @@ The shortcut launches `Sticker.exe --resume`. To toggle it: use the tray menu's 
 [MIT](LICENSE) — © 2026 Zophie
 
 [repo_logo_img]: https://github.com/zophiezlan/sticker/blob/main/StickerApp/app.png
-[repo_url]: [https://github.com/create-go-app/cli](https://github.com/zophiezlan/sticker)
+[repo_url]: https://github.com/zophiezlan/sticker
+[actions]: https://github.com/zophiezlan/sticker/actions
+[latest_release]: https://github.com/zophiezlan/sticker/releases/latest
+[release_shield]: https://img.shields.io/github/v/release/zophiezlan/sticker?label=Latest
+[winget_shield]: https://img.shields.io/winget/v/Zophie.Sticker?label=Winget
+[ci_status_shield]: https://img.shields.io/github/actions/workflow/status/zophiezlan/sticker/.github%2Fworkflows%2Fci.yml?label=CI
+[release_status_shield]: https://img.shields.io/github/actions/workflow/status/zophiezlan/sticker/.github%2Fworkflows%2Frelease.yml?label=Release
+[license_shield]: https://img.shields.io/github/license/zophiezlan/sticker
