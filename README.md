@@ -34,11 +34,13 @@ winget install Zophie.Sticker
 
 OR grab the **[latest release][latest_release]**
 
-### <strong name="build-from-source"></strong> Build from source
+### <strong name="built-from-source"></strong> Built from source
 > Every release is built in the open by [GitHub Actions][actions] straight from this source, so you can verify exactly what's in it.
 
 <details>
-<summary>Click to expand</summary>
+<summary>Build from source yourself</summary>
+
+---
 
 **You'll need:** Windows 11 • [.NET 10 SDK](https://dotnet.microsoft.com/download) • Developer Mode turned on (Settings → System → For developers)
 
