@@ -5,7 +5,7 @@
 #   - StickerShell/AppxManifest.xml  Identity Version (4-part; normalized to 3 here)
 #
 # winget/ is intentionally NOT checked — it tracks the last *published* release and
-# is documented to trail the newest build (see README).
+# is documented to trail the newest build (see docs/DEVELOPMENT.md).
 #
 # Run locally:  pwsh ./tools/check-version.ps1   (also wired into CI)
 
