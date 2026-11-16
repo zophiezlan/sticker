@@ -85,8 +85,13 @@ Your cursor needs to be over the **visible subject** (transparent areas pass cli
 | ↔️  | `F`                | Flip horizontal                           |
 | 👁️  | `D` / double-click | Toggle between cutout and original        |
 | 💾  | `S`                | Save cutout as PNG                        |
-| ❌  | Esc / middle-click | Close sticker                             |
+| 📎  | `Ctrl+C`           | Copy cutout (keeps transparency)          |
+| ❌  | Esc / middle-click | Remove sticker                            |
 | 📋  | Right-click        | Full menu (pin, always-on-top, re-matte…) |
+
+**Temporary stickers:** right-click → **Remove later** → in 1 hour, at end of today, in 1 day or in 1 week, and the sticker removes itself when the time's up — even across restarts (an expired sticker isn't brought back by `--resume`). The menu shows the time left; for a pinned sticker, the tray's **Unpin sticker** list does.
+
+**Copying:** `Ctrl+C` puts the full-resolution cutout on the clipboard as a PNG, so apps that understand it (browsers, Office, Discord, Slack, Paint.NET…) paste it with a transparent background. Older apps may paste it on a solid background.
 
 ### Tray Menu
 
@@ -95,6 +100,7 @@ Sticker lives in your system tray with quick access to:
 - **Paste as sticker** (`Ctrl+Alt+V`) — screenshot something, hit the hotkey, instant sticker
 - **Open images…** — pick files manually
 - **Restore last session** — bring back all your stickers from last time
+- **Hide all stickers** (`Ctrl+Alt+H`) — tuck every sticker away for a screen share or a clear desktop; press again to bring them back
 - **Unpin sticker** — release one pinned (click-through) sticker by name, or **Unpin all stickers** for the lot
 - **Clear matte cache…** — free up disk by deleting cached cutouts (open stickers and downloaded models are untouched)
 - **Start with Windows** — your stickers are always there when you log in
@@ -112,12 +118,13 @@ Sticker.exe --model birefnet-general img.jpg
 
 ## 🧠 AI Models
 
-Not every background removal is perfect on the first try — so Sticker ships with three models you can swap between from a sticker's right-click menu (the **"Matte: …"** entries):
+Not every background removal is perfect on the first try — so Sticker ships with four models you can swap between from a sticker's right-click menu (**Change matte ▸**, which also names the model in use):
 
 | Model               | Best for             | Speed     | Size    |
 | ------------------- | -------------------- | --------- | ------- |
 | `isnet-general-use` | Everything (default) | ⚡ Fast   | ~180 MB |
 | `u2net_human_seg`   | People & portraits   | ⚡ Fast   | ~180 MB |
+| `birefnet-general-lite` | Sharp edges, lighter | 🐇 Medium | ~225 MB |
 | `birefnet-general`  | Maximum quality      | 🐢 Slower | ~900 MB |
 
 Each model's result is cached separately (`~/.sticker_cache`, keyed by image + model). **Switching to a model you've already run loads instantly from that cache** — no re-inference; a model you haven't tried yet runs once, then it's cached too. If you ever want a genuinely fresh pass, use **"Re-process current (ignore cache)."** Set a different default model with `--model` or the `STICKER_MODEL` environment variable. Restoring a session brings each sticker back with the model it was matted with **when that cutout is still cached**; otherwise it falls back to the default, so `--resume` never triggers a slow re-matte at login.
@@ -125,7 +132,7 @@ Each model's result is cached separately (`~/.sticker_cache`, keyed by image + m
 > 🐢 **BiRefNet is heavy.** It runs at 1024×1024 through a transformer backbone, so peak memory is several GB and it's much slower than the others. Two things can make it fail with an ONNX Runtime "out of memory" / "Failed to allocate" error even on a capable card:
 >
 > 1. **DirectML is selecting the wrong GPU.** This is the most common cause on machines with switchable graphics — see [GPU selection](#gpu-selection-hybrid-graphics) in Troubleshooting. Fix that first; it's usually the whole problem.
-> 2. **DirectML genuinely overflows VRAM.** DML's memory planning is less efficient than CUDA, so BiRefNet can need more than its nominal footprint. If you've confirmed the right GPU and it still won't fit, you can shrink the input resolution with `STICKER_BIREFNET_SIZE=768` (or `512`) to trade some edge detail for a smaller footprint, or accept the **retry-on-CPU** prompt (same result, just slower). `STICKER_FORCE_CPU=1` always skips the GPU.
+> 2. **DirectML genuinely overflows VRAM.** DML's memory planning is less efficient than CUDA, so BiRefNet can need more than its nominal footprint — on an 8 GB GTX 1080, neither BiRefNet model fits. If you've confirmed the right GPU and it still won't fit, accept the **retry-on-CPU** prompt (same result, just slower — **BiRefNet Lite** is about 40% faster there). `STICKER_FORCE_CPU=1` always skips the GPU.
 >
 > The lighter `isnet`/`u2net` models run at 320–1024 px and rarely hit any of this.
 
@@ -163,7 +170,7 @@ sticker/
 | **Model download stalls / corrupt**                 | Delete the offending `.onnx` in `%USERPROFILE%\.u2net` and re-create a sticker to re-download (downloads are SHA-256-verified, so a corrupt file is auto-rejected)                                                                   |
 | **Cutout looks stale after re-matte**               | Use the tray's **"Clear matte cache…"** (deletes only cached cutouts, keeps your session + models). Or use **"Re-process current (ignore cache)"** on the sticker itself.                                                            |
 | **Menu only shows for some image types**            | Old versions registered the classic menu under the `image` PerceivedType, which `.webp` (and others) often lack. Re-run `install_context_menu.ps1` / reinstall — it now registers per-extension (`.jpg .jpeg .png .webp .bmp .gif`). |
-| **BiRefNet "out of memory" / "Failed to allocate"** | Usually DirectML on the **wrong GPU** — see [GPU selection](#gpu-selection-hybrid-graphics). If the right GPU still won't fit: `STICKER_BIREFNET_SIZE=768`, take the **CPU retry** prompt, or `STICKER_FORCE_CPU=1`.                 |
+| **BiRefNet "out of memory" / "Failed to allocate"** | Usually DirectML on the **wrong GPU** — see [GPU selection](#gpu-selection-hybrid-graphics). If the right GPU still won't fit: take the **CPU retry** prompt (**BiRefNet Lite** is ~40% faster on CPU), or `STICKER_FORCE_CPU=1`. |
 | **Heavy model fails, then lighter models fail too** | Fixed in current builds — a failed session used to hold its VRAM. Update; if on an old build, restart Sticker to clear it.                                                                                                           |
 | **"Start with Windows" won't stick**                | Check the shortcut exists — see [autostart](#autostart) below                                                                                                                                                                        |
 
@@ -219,7 +226,7 @@ Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11
 | `STICKER_MODEL`         | Default matting model for new stickers (e.g. `birefnet-general`). Same as `--model`.                                                   |
 | `STICKER_DML_DEVICE`    | **Override** the auto-selected DirectML adapter (DXGI index). Normally unnecessary — Sticker picks the highest-VRAM GPU automatically. |
 | `STICKER_FORCE_CPU`     | `1` = skip the GPU entirely and run matting on the CPU (slow, but unlimited memory).                                                   |
-| `STICKER_BIREFNET_SIZE` | BiRefNet input resolution (e.g. `768`, `512`); lower = less memory, less edge detail. Default 1024.                                    |
+| `STICKER_BIREFNET_SIZE` | BiRefNet input resolution (e.g. `768`). Only for custom BiRefNet exports with a flexible input size — the standard rembg downloads only accept the default 1024 and will fail with anything else. |
 | `U2NET_HOME`            | Override the model download folder (default `%USERPROFILE%\.u2net`).                                                                   |
 | `STICKER_SHELL_LOG`     | `1` = write Explorer context-menu diagnostics to `%TEMP%\sticker-shell.log`.                                                           |
 

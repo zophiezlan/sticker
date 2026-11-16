@@ -245,7 +245,8 @@ public partial class App : Application
 
         StartPipeServer();
         CreateTray();
-        RegisterPasteHotkey();
+        RegisterHotkeys();
+        StartExpiryTimer();
 
         // Created idle (Infinite) and armed by BumpIdleTimer() after each matte.
         if (IdleEvictAfter != Timeout.InfiniteTimeSpan)
@@ -263,9 +264,11 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         FlushSessionNow();   // persist any debounced session write before we go
+        _expiryTimer?.Stop();
         if (_hotkeySource is not null)
         {
-            UnregisterHotKey(_hotkeySource.Handle, HotkeyId);
+            UnregisterHotKey(_hotkeySource.Handle, PasteHotkeyId);
+            UnregisterHotKey(_hotkeySource.Handle, HideHotkeyId);
             _hotkeySource.Dispose();
         }
         _idleEvict?.Dispose();
@@ -274,15 +277,16 @@ public partial class App : Application
         base.OnExit(e);
     }
 
-    // --- global paste hotkey (Ctrl+Alt+V) ---
+    // --- global hotkeys: Ctrl+Alt+V paste, Ctrl+Alt+H hide/show all ---
 
     [DllImport("user32.dll")] private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
     [DllImport("user32.dll")] private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
-    private const int HotkeyId = 0x571C;
+    private const int PasteHotkeyId = 0x571C;
+    private const int HideHotkeyId = 0x571D;
     private const int WM_HOTKEY = 0x0312;
     private HwndSource? _hotkeySource;
 
-    private void RegisterPasteHotkey()
+    private void RegisterHotkeys()
     {
         // Message-only window to receive WM_HOTKEY
         var p = new HwndSourceParameters("Sticker.Hotkey")
@@ -292,21 +296,79 @@ public partial class App : Application
         _hotkeySource = new HwndSource(p);
         _hotkeySource.AddHook(HotkeyHook);
         const uint MOD_ALT = 0x1, MOD_CONTROL = 0x2;
-        const uint VK_V = 0x56;
-        if (!RegisterHotKey(_hotkeySource.Handle, HotkeyId, MOD_CONTROL | MOD_ALT, VK_V))
-        {
-            // Some other app owns Ctrl+Alt+V — tray item still works.
-        }
+        const uint VK_V = 0x56, VK_H = 0x48;
+        // If another app already owns a combination, registration just fails —
+        // the matching tray items still work.
+        RegisterHotKey(_hotkeySource.Handle, PasteHotkeyId, MOD_CONTROL | MOD_ALT, VK_V);
+        RegisterHotKey(_hotkeySource.Handle, HideHotkeyId, MOD_CONTROL | MOD_ALT, VK_H);
     }
 
     private IntPtr HotkeyHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
-        if (msg == WM_HOTKEY && wParam.ToInt32() == HotkeyId)
+        if (msg != WM_HOTKEY)
+            return IntPtr.Zero;
+        switch (wParam.ToInt32())
         {
-            PasteAsSticker();
-            handled = true;
+            case PasteHotkeyId:
+                PasteAsSticker();
+                handled = true;
+                break;
+            case HideHotkeyId:
+                SetStickersHidden(!_stickersHidden);
+                handled = true;
+                break;
         }
         return IntPtr.Zero;
+    }
+
+    // --- hide / show all ---
+    //
+    // Hides every sticker without closing it (for screen sharing or a clear look at
+    // the desktop). Not persisted: a restart always shows stickers. Opening a new
+    // sticker while hidden brings everything back, so the new one isn't the only
+    // sticker visible.
+
+    private bool _stickersHidden;
+    private WinForms.ToolStripMenuItem? _hideItem;
+
+    private void SetStickersHidden(bool hidden)
+    {
+        _stickersHidden = hidden;
+        foreach (var w in Stickers)
+        {
+            if (hidden) w.Hide();
+            else w.Show();
+        }
+        if (_hideItem is not null)
+            _hideItem.Text = hidden ? "Show all stickers" : "Hide all stickers";
+    }
+
+    // --- auto-expiry ---
+
+    private System.Windows.Threading.DispatcherTimer? _expiryTimer;
+
+    /// <summary>Every 30 s, close stickers whose "Remove later" deadline has passed.</summary>
+    private void StartExpiryTimer()
+    {
+        _expiryTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
+        _expiryTimer.Tick += (_, _) =>
+        {
+            var now = DateTimeOffset.Now;
+            foreach (var w in Stickers.Where(w => Expiry.IsExpired(w.ExpiresAt, now)).ToList())
+                w.Close();   // NotifyClosed removes it and saves the session
+        };
+        _expiryTimer.Start();
+    }
+
+    /// <summary>Show a tray notification. Safe to call from any sticker.</summary>
+    public static void ShowTip(string message, bool warning = false)
+    {
+        try
+        {
+            ((App)Current)._tray?.ShowBalloonTip(3000, "Sticker", message,
+                warning ? WinForms.ToolTipIcon.Warning : WinForms.ToolTipIcon.Info);
+        }
+        catch { /* notification is best-effort */ }
     }
 
     private void PasteAsSticker()
@@ -499,6 +561,12 @@ public partial class App : Application
         menu.Items.Add("Open images…", null, (_, _) => PickAndOpen());
         menu.Items.Add("Restore last session", null, (_, _) => OpenStickers(new(), false, true));
         menu.Items.Add(new WinForms.ToolStripSeparator());
+        _hideItem = new WinForms.ToolStripMenuItem("Hide all stickers")
+        {
+            ShortcutKeyDisplayString = "Ctrl+Alt+H",
+        };
+        _hideItem.Click += (_, _) => SetStickersHidden(!_stickersHidden);
+        menu.Items.Add(_hideItem);
         menu.Items.Add("Unpin all stickers", null, (_, _) =>
         {
             foreach (var w in Stickers)
@@ -522,17 +590,22 @@ public partial class App : Application
                     new WinForms.ToolStripMenuItem("(none pinned)") { Enabled = false });
                 return;
             }
+            var now = DateTimeOffset.Now;
             foreach (var w in pinned)
             {
                 var target = w;   // capture per iteration
+                // A pinned sticker can't open its own menu, so this is where its
+                // expiry countdown is visible.
+                string label = target.DisplayName;
+                if (target.ExpiresAt is { } at)
+                    label += $"  ({Expiry.FormatRemaining(at - now)} left)";
                 unpinOne.DropDownItems.Add(
-                    new WinForms.ToolStripMenuItem(Path.GetFileName(target.SourcePath),
-                        null, (_, _) => target.SetPinned(false)));
+                    new WinForms.ToolStripMenuItem(label, null, (_, _) => target.SetPinned(false)));
             }
         };
         menu.Items.Add(unpinOne);
 
-        menu.Items.Add("Close all stickers", null, (_, _) => CloseAll());
+        menu.Items.Add("Remove all stickers", null, (_, _) => CloseAll());
         menu.Items.Add("Clear matte cache…", null, (_, _) => ClearMatteCache());
         menu.Items.Add(new WinForms.ToolStripSeparator());
 
@@ -589,6 +662,13 @@ public partial class App : Application
         public override Drawing.Color CheckBackground => Hover;
         public override Drawing.Color CheckSelectedBackground => Hover;
         public override Drawing.Color CheckPressedBackground => Hover;
+        // An item whose submenu is open (e.g. "Unpin sticker") draws as "pressed";
+        // without these it falls back to the light system highlight.
+        public override Drawing.Color MenuItemPressedGradientBegin => Hover;
+        public override Drawing.Color MenuItemPressedGradientMiddle => Hover;
+        public override Drawing.Color MenuItemPressedGradientEnd => Hover;
+        public override Drawing.Color MenuItemSelectedGradientBegin => Hover;
+        public override Drawing.Color MenuItemSelectedGradientEnd => Hover;
     }
 
     private void PickAndOpen()
@@ -619,15 +699,29 @@ public partial class App : Application
         if (restore)
         {
             var saved = Session.Load();
+            // Stickers whose "Remove later" deadline passed while Sticker wasn't
+            // running are dropped rather than restored (the session save at the end
+            // of this method then forgets them).
+            var now = DateTimeOffset.Now;
+            int expired = saved.RemoveAll(s => Expiry.IsExpired(s.ExpiresAt, now));
+            if (expired > 0)
+                ShowTip($"Removed {expired} expired sticker{(expired == 1 ? "" : "s")}.");
             if (saved.Count == 0 && paths.Count == 0)
             {
-                _tray?.ShowBalloonTip(3000, "Sticker", "No saved session to restore.",
-                    WinForms.ToolTipIcon.Info);
+                if (expired == 0)
+                    ShowTip("No saved session to restore.");
+                else
+                    SaveSession();   // forget the expired entries now, not on the next save
                 return;
             }
             jobs.AddRange(saved.Select(s => (s.Source, s.NoMatte, (StickerState?)s)));
         }
         jobs.AddRange(paths.Select(p => (p, noMatte, (StickerState?)null)));
+
+        // Opening anything while stickers are hidden brings them all back, so the
+        // new sticker isn't the only one on screen.
+        if (_stickersHidden && jobs.Count > 0)
+            SetStickersHidden(false);
 
         // One-time "downloading model" notice (first run only)
         Window? notice = null;

@@ -22,6 +22,7 @@ public sealed class StickerState
     [JsonPropertyName("on_top")] public bool OnTop { get; set; } = true;
     [JsonPropertyName("pinned")] public bool Pinned { get; set; }  // extra key; Python ignores it
     [JsonPropertyName("model")] public string? Model { get; set; } // extra key; Python ignores it
+    [JsonPropertyName("expires_at")] public DateTimeOffset? ExpiresAt { get; set; } // extra key; Python ignores it
 }
 
 public static class Session

@@ -21,6 +21,9 @@ public partial class StickerWindow : Window
     /// <summary>Path to the original image this sticker was created from.</summary>
     public string SourcePath => _sourcePath;
 
+    /// <summary>Short name for menus: the file name, or "Pasted image (time)" for a clipboard capture.</summary>
+    public string DisplayName => StickerNames.Display(_sourcePath, DateTime.Now);
+
     // Which model produced the matte currently shown — drives the menu checkmark
     // and the "re-process" action. Starts as the app default used at open time.
     private string _currentModel = App.ActiveModel;
@@ -46,6 +49,10 @@ public partial class StickerWindow : Window
     private bool _flipped;
     private bool _pinned;
     private bool _rematting;   // guards Rematte against reentrant model picks
+    private DateTimeOffset? _expiresAt;   // auto-expiry deadline; null = keep
+
+    /// <summary>When this sticker removes itself (null = never). Checked by App's expiry timer.</summary>
+    public DateTimeOffset? ExpiresAt => _expiresAt;
 
     private MenuItem? _toggleItem;
 
@@ -86,6 +93,7 @@ public partial class StickerWindow : Window
             _pinned = state.Pinned;
             Opacity = Math.Clamp(state.Opacity, 0.15, 1.0);
             Topmost = state.OnTop;
+            _expiresAt = state.ExpiresAt;
         }
 
         ApplyVisuals();
@@ -141,6 +149,7 @@ public partial class StickerWindow : Window
         OnTop = Topmost,
         Pinned = _pinned,
         Model = _noMatte ? null : (_recordedModel ?? _currentModel),
+        ExpiresAt = _expiresAt,
     };
 
     // --- pin (click-through) ---
@@ -346,6 +355,9 @@ public partial class StickerWindow : Window
             case Key.S:
                 SaveCutout();
                 break;
+            case Key.C when Keyboard.Modifiers.HasFlag(ModifierKeys.Control):
+                CopyCutout();
+                break;
             case Key.Left or Key.Right or Key.Up or Key.Down:
                 Nudge(e.Key, shift);
                 e.Handled = true;   // don't let arrows bubble to default focus navigation
@@ -408,9 +420,60 @@ public partial class StickerWindow : Window
         if (dialog.ShowDialog() != true)
             return;
 
-        // Render the full-resolution matte with current flip/rotation applied. The
-        // on-screen copy may be downscaled, so reload the full-res cutout from disk;
-        // if it's gone (e.g. "Clear matte cache"), fall back to the display copy.
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(RenderCutout()));
+        using var fs = File.Create(dialog.FileName);
+        encoder.Save(fs);
+    }
+
+    /// <summary>
+    /// Put the full-resolution cutout (with flip/rotation) on the clipboard. Two
+    /// formats: "PNG" keeps transparency in apps that read it (browsers, Office,
+    /// Paint.NET, Discord, Slack…); the standard bitmap is the fallback everything
+    /// else understands, though most of those flatten the transparent areas.
+    /// </summary>
+    private void CopyCutout()
+    {
+        var image = RenderCutout();
+        var png = new MemoryStream();
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(image));
+        encoder.Save(png);
+
+        var data = new DataObject();
+        data.SetData("PNG", png, autoConvert: false);
+        data.SetImage(image);
+
+        // The clipboard is shared and singly-owned: another app holding it open makes
+        // the write fail transiently, so retry briefly before giving up.
+        for (int attempt = 0; ; attempt++)
+        {
+            try
+            {
+                Clipboard.SetDataObject(data, copy: true);
+                App.ShowTip("Cutout copied to the clipboard.");
+                return;
+            }
+            catch (System.Runtime.InteropServices.COMException) when (attempt < 4)
+            {
+                Thread.Sleep(50);
+            }
+            catch (System.Runtime.InteropServices.COMException)
+            {
+                App.ShowTip("Couldn't copy — another app is using the clipboard. Try again.", warning: true);
+                return;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The full-resolution matte with the current flip/rotation applied — what Save
+    /// and Copy export. The on-screen copy may be downscaled, so reload the full-res
+    /// cutout from disk; if it's gone (e.g. "Clear matte cache"), fall back to the
+    /// display copy.
+    /// </summary>
+    private BitmapSource RenderCutout()
+    {
         BitmapSource src;
         try { src = ImageLoader.Load(_mattedPath).Image; }
         catch { src = _matted; }
@@ -432,11 +495,20 @@ public partial class StickerWindow : Window
         var target = new RenderTargetBitmap(
             (int)Math.Ceiling(bw), (int)Math.Ceiling(bh), 96, 96, PixelFormats.Pbgra32);
         target.Render(visual);
+        target.Freeze();
+        return target;
+    }
 
-        var encoder = new PngBitmapEncoder();
-        encoder.Frames.Add(BitmapFrame.Create(target));
-        using var fs = File.Create(dialog.FileName);
-        encoder.Save(fs);
+    /// <summary>Set (or clear, with null) when this sticker removes itself.</summary>
+    private void SetExpiry(Expiry.Choice? choice)
+    {
+        bool wasSet = _expiresAt is not null;
+        _expiresAt = choice is { } c ? Expiry.Resolve(c, DateTimeOffset.Now) : null;
+        App.SaveSession();
+        if (_expiresAt is { } at)
+            App.ShowTip($"This sticker will be removed in {Expiry.FormatRemaining(at - DateTimeOffset.Now)}.");
+        else if (wasSet)
+            App.ShowTip("Timer cleared — this sticker will stay.");
     }
 
     private async void Rematte(string? model = null, bool force = false)
@@ -597,6 +669,7 @@ public partial class StickerWindow : Window
         AddItem(menu, "Rotate 90° left", "", () => Rotate(-90));
         AddItem(menu, "Flip horizontal", "F", FlipHorizontal);
         AddItem(menu, "Save cutout as PNG…", "S", SaveCutout);
+        AddItem(menu, "Copy cutout", "Ctrl+C", CopyCutout);
 
         if (!_noMatte)
         {
@@ -605,24 +678,55 @@ public partial class StickerWindow : Window
             // re-inference); a model you haven't tried yet runs once (downloading
             // first if needed — BiRefNet is ~900 MB), then it's cached too.
             // "Re-process" forces a fresh run of the current model, ignoring cache.
-            menu.Items.Add(new Separator());
+            // All of it lives in a "Change matte" submenu whose header names the
+            // model in use, since the checkmarks are hidden until it opens.
+            var matte = new MenuItem();
             foreach (var info in Models.Pickable)
-                AddModelChoice(menu.Items, info.MenuLabel, info.Id);
-            AddItem(menu, "Re-process current (ignore cache)", "", () => Rematte(_currentModel, force: true));
+                AddModelChoice(matte.Items, info.MenuLabel, info.Id);
+            matte.Items.Add(new Separator());
+            var reprocess = new MenuItem { Header = "Re-process current (ignore cache)" };
+            reprocess.Click += (_, _) => Rematte(_currentModel, force: true);
+            matte.Items.Add(reprocess);
+            menu.Items.Add(new Separator());
+            menu.Items.Add(matte);
 
-            // Checkmarks are set at build time; refresh them to the active model
-            // each time the menu opens, since the selection changes at runtime.
+            // Checkmarks and the header are refreshed each time the menu opens,
+            // since the model changes at runtime.
             menu.Opened += (_, _) =>
             {
-                foreach (var obj in menu.Items)
+                foreach (var obj in matte.Items)
                     if (obj is MenuItem mi && mi.Tag is string tag)
                         mi.IsChecked = tag == _currentModel;
+                matte.Header = $"Change matte ({Models.ShortName(_currentModel)})";
             };
         }
 
+        // Removal: now, later (auto-expiry), or everything. "Remove later" shows the
+        // countdown in its header, refreshed each time the menu opens.
         menu.Items.Add(new Separator());
-        AddItem(menu, "Close", "Esc", Close);
-        AddItem(menu, "Close all stickers", "", App.CloseAll);
+        AddItem(menu, "Remove sticker", "Esc", Close);
+
+        var later = new MenuItem();
+        foreach (var (choice, label) in Expiry.Choices)
+        {
+            var item = new MenuItem { Header = label };
+            item.Click += (_, _) => SetExpiry(choice);
+            later.Items.Add(item);
+        }
+        later.Items.Add(new Separator());
+        var keep = new MenuItem { Header = "Don't remove", IsCheckable = true };
+        keep.Click += (_, _) => SetExpiry(null);
+        later.Items.Add(keep);
+        menu.Items.Add(later);
+        menu.Opened += (_, _) =>
+        {
+            keep.IsChecked = _expiresAt is null;
+            later.Header = _expiresAt is { } at
+                ? $"Remove later ({Expiry.FormatRemaining(at - DateTimeOffset.Now)} left)"
+                : "Remove later";
+        };
+
+        AddItem(menu, "Remove all stickers", "", App.CloseAll);
 
         ContextMenu = menu;
     }
