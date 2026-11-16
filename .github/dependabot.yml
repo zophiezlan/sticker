@@ -1,0 +1,19 @@
+# Weekly update PRs for NuGet packages and GitHub Actions, so dependencies don't
+# silently drift. Minor/patch bumps are grouped into one PR per ecosystem.
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      nuget-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

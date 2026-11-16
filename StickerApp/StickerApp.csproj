@@ -15,6 +15,10 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <!-- Precompile to native code on publish: snappier cold start -->
     <PublishReadyToRun>true</PublishReadyToRun>
+    <!-- Ship English resources only: WPF/WinForms otherwise publish a dozen
+         localized satellite-assembly folders the (English-only) UI never uses,
+         adding a few MB to the installer. -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <Version>1.1.0</Version>
     <Product>Sticker</Product>
     <Description>Floating, background-removed image cutouts for the Windows desktop.</Description>
