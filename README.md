@@ -14,66 +14,33 @@
 ---
 
 ## ✨ Why Sticker?
-|                                |                                                                                                                     |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
-| 🖱️ **One click**               | Right-click any image → Open as sticker. No extra apps, no export steps.                                            |
-| 🧠 **AI-powered**              | Background removal runs 100% locally on your GPU (or CPU).                                                          |
-| 👻 **Click-through**           | Click pass-through on transparent layers.               |
-| 💾 **Remembers everything**    | Close your laptop, reboot, whatever - stickers come back where you left them.                          |
-| ⚡ **Instant after first use** | The AI model stays warm in a tiny tray app.                                     |
+|                                |                                                                               |
+| ------------------------------ | ----------------------------------------------------------------------------- |
+| 🖱️ **One click**               | Right-click any image → Open as sticker. No extra apps, no export steps.      |
+| 🧠 **AI-powered**              | Background removal runs 100% locally on your GPU (or CPU). No uploads.        |
+| 👻 **Click-through**           | Clicks pass straight through the transparent parts of a sticker.             |
+| 💾 **Remembers everything**    | Reboot, close your laptop, whatever — stickers come back where you left them. |
+| ⚡ **Instant after first use** | The AI model stays warm in a tiny tray app.                                   |
 
 ---
 
 ## 🚀 Get Started
 
-### Install the app via winget
-
 ```powershell
 winget install Zophie.Sticker
 ```
 
-OR grab the **[latest release][latest_release]**
+Or grab the **[latest release][latest_release]** installer. Every release is built in the open by [GitHub Actions][actions] straight from this source.
 
-### <strong name="built-from-source"></strong> Built from source
-> Every release is built in the open by [GitHub Actions][actions] straight from this source, so you can verify exactly what's in it.
+Then right-click any image → **Open as sticker**. On Windows 11 it's under **Show more options** ([why?](docs/DEVELOPMENT.md#context-menu-placement)). The first sticker downloads the AI model once (~180 MB); after that everything works offline.
 
-<details>
-<summary>Build from source yourself</summary>
-
----
-
-**You'll need:** Windows 11 • [.NET 10 SDK](https://dotnet.microsoft.com/download) • Developer Mode turned on (Settings → System → For developers)
-
-Then just run:
-
-```powershell
-.\setup_modern_menu.ps1
-```
-
-That's it! You'll see **"Open as sticker"** in your right-click menu on any image file.
-
-> 💡 **No Developer Mode?** No problem — use the classic menu fallback instead:
->
-> ```powershell
-> dotnet publish StickerApp\StickerApp.csproj -c Release
-> .\install_context_menu.ps1
-> ```
->
-> The entry will appear under "Show more options" in the context menu.
-
-The first time you create a sticker, the AI model downloads automatically (~180 MB, one-time). After that, everything is instant and fully offline.
-
-To uninstall, run `.\setup_modern_menu.ps1 -Uninstall`.
-
-> 🧪 **Contributing?** `dotnet test Sticker.slnx` builds both projects and runs the unit tests (matte cache-key derivation, tolerant session parsing, the bilinear resize math, and the model registry). CI runs the same on every push/PR, and also checks that the version and the supported-image-extension list stay consistent across the installers and the MSIX manifest.
-
-</details>   
+Want to build it yourself? See **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**.
 
 ---
 
 ## 🎮 Using Stickers
 
-Your cursor needs to be over the **visible subject** (transparent areas pass clicks through). Here's what you can do:
+Your cursor needs to be over the **visible subject** (transparent areas pass clicks through).
 
 |     | Action             | What it does                              |
 | --- | ------------------ | ----------------------------------------- |
@@ -87,25 +54,23 @@ Your cursor needs to be over the **visible subject** (transparent areas pass cli
 | 💾  | `S`                | Save cutout as PNG                        |
 | 📎  | `Ctrl+C`           | Copy cutout (keeps transparency)          |
 | ❌  | Esc / middle-click | Remove sticker                            |
-| 📋  | Right-click        | Full menu (pin, always-on-top, re-matte…) |
+| 📋  | Right-click        | Full menu (pin, always-on-top, models…)   |
 
-**Temporary stickers:** right-click → **Remove later** → in 1 hour, at end of today, in 1 day or in 1 week, and the sticker removes itself when the time's up — even across restarts (an expired sticker isn't brought back by `--resume`). The menu shows the time left; for a pinned sticker, the tray's **Unpin sticker** list does.
+**Temporary stickers:** right-click → **Remove later** → in 1 hour, at end of today, in 1 day or in 1 week. The sticker removes itself when time's up, even across restarts.
 
-**Copying:** `Ctrl+C` puts the full-resolution cutout on the clipboard as a PNG, so apps that understand it (browsers, Office, Discord, Slack, Paint.NET…) paste it with a transparent background. Older apps may paste it on a solid background.
+**Pinning** makes a sticker click-through so it can't be moved by accident. Unpin it from the tray.
 
-### Tray Menu
-
-Sticker lives in your system tray with quick access to:
+### Tray menu
 
 - **Paste as sticker** (`Ctrl+Alt+V`) — screenshot something, hit the hotkey, instant sticker
 - **Open images…** — pick files manually
-- **Restore last session** — bring back all your stickers from last time
-- **Hide all stickers** (`Ctrl+Alt+H`) — tuck every sticker away for a screen share or a clear desktop; press again to bring them back
-- **Unpin sticker** — release one pinned (click-through) sticker by name, or **Unpin all stickers** for the lot
-- **Clear matte cache…** — free up disk by deleting cached cutouts (open stickers and downloaded models are untouched)
-- **Start with Windows** — your stickers are always there when you log in
+- **Restore last session** — bring back your stickers from last time
+- **Hide all stickers** (`Ctrl+Alt+H`) — clear the desktop for a screen share; press again to bring them back
+- **Unpin sticker / Unpin all stickers** — release pinned stickers
+- **Clear matte cache…** — free disk space used by cached cutouts
+- **Start with Windows** — your stickers are there when you log in
 
-### Command Line
+### Command line
 
 ```
 Sticker.exe photo.jpg [more-images...]
@@ -118,163 +83,36 @@ Sticker.exe --model birefnet-general img.jpg
 
 ## 🧠 AI Models
 
-Not every background removal is perfect on the first try — so Sticker ships with four models you can swap between from a sticker's right-click menu (**Change matte ▸**, which also names the model in use):
+Not every cutout is perfect first time, so you can switch models per sticker from right-click → **Change matte**:
 
-| Model               | Best for             | Speed     | Size    |
-| ------------------- | -------------------- | --------- | ------- |
-| `isnet-general-use` | Everything (default) | ⚡ Fast   | ~180 MB |
-| `u2net_human_seg`   | People & portraits   | ⚡ Fast   | ~180 MB |
+| Model                   | Best for             | Speed     | Size    |
+| ----------------------- | -------------------- | --------- | ------- |
+| `isnet-general-use`     | Everything (default) | ⚡ Fast   | ~180 MB |
+| `u2net_human_seg`       | People & portraits   | ⚡ Fast   | ~180 MB |
 | `birefnet-general-lite` | Sharp edges, lighter | 🐇 Medium | ~225 MB |
-| `birefnet-general`  | Maximum quality      | 🐢 Slower | ~900 MB |
+| `birefnet-general`      | Maximum quality      | 🐢 Slower | ~900 MB |
 
-Each model's result is cached separately (`~/.sticker_cache`, keyed by image + model). **Switching to a model you've already run loads instantly from that cache** — no re-inference; a model you haven't tried yet runs once, then it's cached too. If you ever want a genuinely fresh pass, use **"Re-process current (ignore cache)."** Set a different default model with `--model` or the `STICKER_MODEL` environment variable. Restoring a session brings each sticker back with the model it was matted with **when that cutout is still cached**; otherwise it falls back to the default, so `--resume` never triggers a slow re-matte at login.
+Each model downloads on first use, and every result is cached, so switching back to a model you've already tried is instant. Change the default with `--model` or the `STICKER_MODEL` environment variable.
 
-> 🐢 **BiRefNet is heavy.** It runs at 1024×1024 through a transformer backbone, so peak memory is several GB and it's much slower than the others. Two things can make it fail with an ONNX Runtime "out of memory" / "Failed to allocate" error even on a capable card:
->
-> 1. **DirectML is selecting the wrong GPU.** This is the most common cause on machines with switchable graphics — see [GPU selection](#gpu-selection-hybrid-graphics) in Troubleshooting. Fix that first; it's usually the whole problem.
-> 2. **DirectML genuinely overflows VRAM.** DML's memory planning is less efficient than CUDA, so BiRefNet can need more than its nominal footprint — on an 8 GB GTX 1080, neither BiRefNet model fits. If you've confirmed the right GPU and it still won't fit, accept the **retry-on-CPU** prompt (same result, just slower — **BiRefNet Lite** is about 40% faster there). `STICKER_FORCE_CPU=1` always skips the GPU.
->
-> The lighter `isnet`/`u2net` models run at 320–1024 px and rarely hit any of this.
-
----
-
-## 🏗️ How It Works
-
-```
-sticker/
-├── StickerApp/       → WPF tray app (the main show)
-├── StickerShell/     → Explorer right-click menu integration
-└── prototype/        → Original Python version (still works!)
-```
-
-**StickerApp** is a WPF app where each sticker is a borderless, transparent window with per-pixel alpha hit-testing — your clicks pass through transparent pixels for free. Background removal uses ONNX Runtime with DirectML (GPU acceleration on any DX12 graphics card, automatic CPU fallback). A single tray process keeps the model warm so subsequent stickers open instantly.
-
-**StickerShell** is a COM server (`IExplorerCommand`) that puts "Open as sticker" in the top-level Windows 11 context menu — no "Show more options" submenu needed. Registered via a sparse package.
-
-**prototype/** is the original Python version (rembg + PyQt6). It shares the model folder (`~/.u2net`), matte cache (`~/.sticker_cache`), and session file with the C# app — useful as a test bench or if you prefer Python.
+> 🐢 **BiRefNet needs a lot of GPU memory.** If it runs out, Sticker offers to retry on the CPU (same result, slower — BiRefNet Lite is the quicker of the two there). On laptops with two GPUs, see [GPU selection](docs/TROUBLESHOOTING.md#gpu-selection).
 
 ---
 
 ## 🛠️ Troubleshooting
 
-### Common fixes
+| Problem                                          | Fix                                                                                                                         |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| **"Open as sticker" is missing from the menu**   | On Windows 11 it's under **Show more options** for the installer/winget version. Reinstalling re-registers it.              |
+| **BiRefNet "out of memory"**                     | Accept the CPU retry, try BiRefNet Lite, or check [GPU selection](docs/TROUBLESHOOTING.md#gpu-selection).                   |
+| **Model download failed or got corrupted**       | Delete the `.onnx` file in `%USERPROFILE%\.u2net` and open a sticker again — downloads are checked and re-fetched.           |
+| **A cutout looks wrong or stale**                | Right-click → **Change matte** → **Re-process current**, or try another model.                                              |
+| **"Start with Windows" won't stick**             | See [Autostart](docs/TROUBLESHOOTING.md#autostart).                                                                         |
 
-| Problem                                             | Fix                                                                                                                                                                                                                                  |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **NU1100 on first build**                           | Your SDK is missing the NuGet feed. Run: `dotnet nuget add source https://api.nuget.org/v3/index.json -n nuget.org`                                                                                                                  |
-| **Package registration fails**                      | Developer Mode is off. Turn it on in Settings → System → For developers.                                                                                                                                                             |
-| **Menu entry does nothing**                         | Set env var `STICKER_SHELL_LOG=1`, restart Explorer, try again, then check `%TEMP%\sticker-shell.log`                                                                                                                                |
-| **No top-level entry, only "Show more options"**    | Expected for the `.exe`/winget install — see [Context menu placement](#context-menu-placement) below                                                                                                                                 |
-| **Menu entry vanished after rebuild**               | Re-run `.\setup_modern_menu.ps1` — the registration points at `publish\`, so don't move that folder                                                                                                                                  |
-| **Stickers die when terminal closes**               | Don't use `dotnet run` — use the published exe (or launch via the context menu)                                                                                                                                                      |
-| **Model download stalls / corrupt**                 | Delete the offending `.onnx` in `%USERPROFILE%\.u2net` and re-create a sticker to re-download (downloads are SHA-256-verified, so a corrupt file is auto-rejected)                                                                   |
-| **Cutout looks stale after re-matte**               | Use the tray's **"Clear matte cache…"** (deletes only cached cutouts, keeps your session + models). Or use **"Re-process current (ignore cache)"** on the sticker itself.                                                            |
-| **Menu only shows for some image types**            | Old versions registered the classic menu under the `image` PerceivedType, which `.webp` (and others) often lack. Re-run `install_context_menu.ps1` / reinstall — it now registers per-extension (`.jpg .jpeg .png .webp .bmp .gif`). |
-| **BiRefNet "out of memory" / "Failed to allocate"** | Usually DirectML on the **wrong GPU** — see [GPU selection](#gpu-selection-hybrid-graphics). If the right GPU still won't fit: take the **CPU retry** prompt (**BiRefNet Lite** is ~40% faster on CPU), or `STICKER_FORCE_CPU=1`. |
-| **Heavy model fails, then lighter models fail too** | Fixed in current builds — a failed session used to hold its VRAM. Update; if on an old build, restart Sticker to clear it.                                                                                                           |
-| **"Start with Windows" won't stick**                | Check the shortcut exists — see [autostart](#autostart) below                                                                                                                                                                        |
+More fixes, settings and where Sticker keeps its files: **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)**.
 
-### <a name="context-menu-placement"></a> Context menu placement (top-level vs. "Show more options")
+### Uninstalling
 
-Sticker can install its right-click entry two different ways, and which one you get depends on how you installed:
-
-| Install method                                    | Where "Open as sticker" appears         | How it's registered                                   |
-| ------------------------------------------------- | --------------------------------------- | ----------------------------------------------------- |
-| **`.exe` installer / winget**                     | Under **"Show more options"** (classic) | A plain `HKCU` registry verb                          |
-| **`setup_modern_menu.ps1`** (build from source)   | **Top-level** Win11 menu                | An unsigned sparse app package (needs Developer Mode) |
-| **`install_context_menu.ps1`** (classic fallback) | Under **"Show more options"** (classic) | A plain `HKCU` registry verb                          |
-
-**Why the difference?** Windows 11 only lets an entry into the _top-level_ context menu if it comes from an app package that implements `IExplorerCommand` (Microsoft deliberately closed the top-level menu to the old registry verbs to stop the Win10 clutter). That package has to be **code-signed** to install normally — an _unsigned_ package only registers via `Add-AppxPackage -Register` with **Developer Mode** on, which is a developer convenience, not something you can ship to end users.
-
-Sticker isn't code-signed yet (solo project, certs are pricey), so:
-
-- The shippable installers (the `.exe` and winget) fall back to the **classic** registry verb → lands under "Show more options". Installs cleanly for everyone, no Developer Mode needed.
-- The **top-level** menu currently only works via `setup_modern_menu.ps1`, which registers the unsigned package locally and therefore needs Developer Mode.
-
-This is a limitation of _not being signed_, not a deliberate choice — both menus launch the exact same app. If/when Sticker ships a signed MSIX (e.g. via the Microsoft Store, which signs packages for you), the top-level menu can be the default everywhere.
-
-If you've installed the `.exe` and want the top-level entry too, you can run `setup_modern_menu.ps1` alongside it; the two registrations are independent (you'd then see both entries until you remove one).
-
-### <a name="gpu-selection-hybrid-graphics"></a> GPU selection (hybrid graphics)
-
-Sticker **auto-selects the highest-VRAM adapter** for DirectML, so hybrid-graphics machines should use the discrete GPU without any setup. (Earlier builds blindly used DXGI adapter 0 — and _whichever GPU drives your primary display is normally adapter 0_ — so on switchable-graphics systems they'd land on a low-memory integrated GPU and heavy models would OOM while the real card sat idle. That's now handled automatically.)
-
-If a heavy model still fails with "out of memory" while your GPU clearly has free VRAM, the auto-pick may have chosen wrong — here's how to take control:
-
-**Force a specific adapter** with `STICKER_DML_DEVICE` (the DXGI adapter index). Find the index of the GPU you want and set it explicitly — try `1` if `0` is the iGPU:
-
-```powershell
-[Environment]::SetEnvironmentVariable('STICKER_DML_DEVICE','1','User')
-```
-
-Then fully quit Sticker from the tray and relaunch. If `1` is also wrong, try `2`, etc. To clear it: set the value to `$null`.
-
-To check what you're working with, see your adapters and their dedicated VRAM:
-
-```powershell
-Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\*' -EA SilentlyContinue |
-  Where-Object { $_.'HardwareInformation.qwMemorySize' } |
-  ForEach-Object { '{0} — {1:N0} GB' -f $_.DriverDesc, ($_.'HardwareInformation.qwMemorySize'/1GB) }
-```
-
-> Note the adapter index can change when your display setup changes. For example, after moving a monitor onto the dGPU, the dGPU becomes adapter 0 — so a previously-needed `STICKER_DML_DEVICE=1` would then point _back_ at the iGPU. Clear the variable once the dGPU is your primary display.
-
-### Environment variables
-
-| Variable                | Effect                                                                                                                                 |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `STICKER_MODEL`         | Default matting model for new stickers (e.g. `birefnet-general`). Same as `--model`.                                                   |
-| `STICKER_DML_DEVICE`    | **Override** the auto-selected DirectML adapter (DXGI index). Normally unnecessary — Sticker picks the highest-VRAM GPU automatically. |
-| `STICKER_FORCE_CPU`     | `1` = skip the GPU entirely and run matting on the CPU (slow, but unlimited memory).                                                   |
-| `STICKER_BIREFNET_SIZE` | BiRefNet input resolution (e.g. `768`). Only for custom BiRefNet exports with a flexible input size — the standard rembg downloads only accept the default 1024 and will fail with anything else. |
-| `U2NET_HOME`            | Override the model download folder (default `%USERPROFILE%\.u2net`).                                                                   |
-| `STICKER_SHELL_LOG`     | `1` = write Explorer context-menu diagnostics to `%TEMP%\sticker-shell.log`.                                                           |
-
-### Where Sticker keeps its files
-
-Everything is per-user, under your profile folder — nothing is written to `Program Files` or `HKLM`. Paste these straight into Explorer's address bar:
-
-| What                | Location                                    | Notes                                                                                                                                                                                                                         |
-| ------------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **AI models**       | `%USERPROFILE%\.u2net`                      | One `.onnx` per model. Override the folder with the `U2NET_HOME` env var. Safe to delete — re-downloads on next use.                                                                                                          |
-| **Matte cache**     | `%USERPROFILE%\.sticker_cache`              | Cached cutout PNGs, keyed per image+model. Prefer the tray's **"Clear matte cache…"** over deleting by hand — the same folder also holds your session and clipboard captures (the latter auto-pruned to the most recent few). |
-| **Session**         | `%USERPROFILE%\.sticker_cache\session.json` | Positions/sizes of your open stickers — what `--resume` restores. Shared with the Python prototype. (Don't delete the whole `.sticker_cache` folder to clear cutouts — you'd lose this.)                                      |
-| **Shell debug log** | `%TEMP%\sticker-shell.log`                  | Only written when `STICKER_SHELL_LOG=1` is set.                                                                                                                                                                               |
-
-### Registry entries
-
-Sticker touches very little of the registry, and everything lives under **`HKEY_CURRENT_USER`** (no admin, no machine-wide keys). Open `regedit` and paste a path into its address bar to inspect.
-
-**Classic context-menu verb** (only present if you used `install_context_menu.ps1` / the classic fallback):
-
-```
-HKCU\Software\Classes\SystemFileAssociations\image\shell\OpenAsSticker
-HKCU\Software\Classes\SystemFileAssociations\image\shell\OpenAsSticker\command
-```
-
-The `\command` subkey holds the exact launch line (`"...\Sticker.exe" "%1"`) — handy for confirming the menu points at the right executable. Delete the `OpenAsSticker` key to remove the classic verb by hand.
-
-**Modern (Windows 11) context menu** is _not_ a plain registry verb — it's a sparse MSIX package registering an `IExplorerCommand` COM server. So you won't find it under `shell\`. Instead:
-
-- List it: `Get-AppxPackage *Sticker*` in PowerShell
-- Remove it: `.\setup_modern_menu.ps1 -Uninstall` (or `Remove-AppxPackage <PackageFullName>`)
-- The COM registration is owned by the package and disappears with it — don't hand-edit it.
-
-<a name="autostart"></a>**Autostart** is deliberately _not_ a `...\CurrentVersion\Run` key (that location is malware's favourite, so Defender scores writes to it harshly). Instead it's a plain shortcut in your Startup folder:
-
-```
-%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\Sticker.lnk
-```
-
-The shortcut launches `Sticker.exe --resume`. To toggle it: use the tray menu's **"Start with Windows"**, or just create/delete that `.lnk` yourself (type `shell:startup` in Explorer to open the folder).
-
-### Deeper diagnostics
-
-- **Right-click menu misbehaving?** Set the user env var `STICKER_SHELL_LOG=1`, restart Explorer (`taskkill /f /im explorer.exe & start explorer.exe`), reproduce, then read `%TEMP%\sticker-shell.log` — it traces each `IExplorerCommand` call.
-- **Verify the modern package is actually registered:** `Get-AppxPackage *Sticker* | Format-List Name, PackageFullName, InstallLocation`. If `InstallLocation` no longer exists (e.g. you moved/deleted `publish\`), the menu silently breaks — re-run `setup_modern_menu.ps1`.
-- **GPU vs CPU matting:** Sticker uses ONNX Runtime with DirectML and falls back to CPU automatically. If matting is unexpectedly slow, your GPU path may be falling back — check the tray app's console/output, and confirm a DX12-capable GPU and current drivers.
-- **Force a model from scratch:** delete its `.onnx` from `%USERPROFILE%\.u2net` _and_ clear `%USERPROFILE%\.sticker_cache` so no stale cutouts are served.
-- **Full reset (nuke everything user-side):** uninstall the app, then delete `%USERPROFILE%\.u2net`, `%USERPROFILE%\.sticker_cache`, the `Sticker.lnk` startup shortcut, and (if you used the classic menu) the `HKCU\...\OpenAsSticker` registry key.
+Uninstall from **Settings → Apps** (or `winget uninstall Zophie.Sticker`). Downloaded models and cached cutouts stay in your profile so a reinstall is instant — see [Full reset](docs/TROUBLESHOOTING.md#full-reset) to remove them too.
 
 ---
 

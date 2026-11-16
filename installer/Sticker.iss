@@ -90,6 +90,6 @@ begin
     // [Icons] entry; this also covers a toggle-created one it doesn't track.)
     DeleteFile(ExpandConstant('{userstartup}\Sticker.lnk'));
     // Note: ~/.sticker_cache (models, mattes, session) is left in place so a
-    // reinstall doesn't re-download models. Mention manual cleanup in README.
+    // reinstall doesn't re-download models. Manual cleanup: docs/TROUBLESHOOTING.md (Full reset).
   end;
 end;

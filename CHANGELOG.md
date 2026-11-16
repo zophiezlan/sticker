@@ -30,6 +30,14 @@ All notable changes to Sticker are documented here.
   names the model in use (e.g. "Change matte (ISNet)"), keeping the sticker
   menu shorter. "Re-process current (ignore cache)" lives there too.
 
+### Changed (docs)
+
+- **Slimmer README.** Build instructions, project layout and release steps
+  moved to `docs/DEVELOPMENT.md`; GPU selection, settings, file locations,
+  registry entries and diagnostics moved to `docs/TROUBLESHOOTING.md`.
+  Outdated notes about long-fixed issues were removed, and the registry
+  section now shows the per-extension keys Sticker actually uses.
+
 ### Fixed
 
 - **The tray menu's hover highlight and check marks now match its dark
