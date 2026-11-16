@@ -2,6 +2,44 @@
 
 All notable changes to Sticker are documented here.
 
+## [Unreleased]
+
+### Added
+
+- **Temporary stickers.** Right-click → **Remove later** → in 1 hour, at end
+  of today, in 1 day or in 1 week. The sticker removes itself when its time is up, and
+  one that expires while Sticker isn't running isn't brought back by
+  `--resume`. The menu shows the time left; for pinned (click-through)
+  stickers, the tray's **Unpin sticker** list shows it instead.
+- **Copy cutout** (`Ctrl+C`, or right-click → **Copy cutout**) puts the
+  full-resolution cutout on the clipboard as a PNG, so apps that support it
+  paste it with its transparent background.
+- **Hide all stickers** (`Ctrl+Alt+H`, or from the tray) tucks every sticker
+  away without closing it — handy for screen sharing. Press again to bring them
+  back; opening a new sticker also brings them back.
+- **New model: BiRefNet Lite** (`birefnet-general-lite`, ~225 MB) in the
+  right-click model picker — BiRefNet's sharp edges at a quarter of the
+  download, and about 40% faster when it runs on the CPU.
+
+### Changed
+
+- **"Close" is now "Remove sticker"** (and "Close all stickers" is "Remove all
+  stickers", in the sticker menu and the tray), grouped with the new **Remove
+  later** timer. Removing a sticker never touches the image file.
+- **The matting models moved into a "Change matte" submenu**, whose header
+  names the model in use (e.g. "Change matte (ISNet)"), keeping the sticker
+  menu shorter. "Re-process current (ignore cache)" lives there too.
+
+### Fixed
+
+- **The tray menu's hover highlight and check marks now match its dark
+  theme.** They were drawn in Windows' light-blue system highlight, because
+  WinForms ignores custom menu colors unless visual styles are enabled, which
+  a WPF app never does.
+- The README no longer suggests `STICKER_BIREFNET_SIZE=768` as an
+  out-of-memory fix: the standard BiRefNet downloads only accept 1024 input,
+  so other sizes fail.
+
 ## [1.1.1] — 2026-11-16
 
 ### Fixed

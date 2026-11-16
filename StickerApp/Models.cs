@@ -11,7 +11,7 @@ namespace StickerApp;
 /// </summary>
 /// <param name="Id">The model id (also the <c>--model</c> / <c>STICKER_MODEL</c> value).</param>
 /// <param name="FileName">The <c>.onnx</c> file in <c>~/.u2net</c> this model loads from.</param>
-/// <param name="MenuLabel">Label for the right-click "Matte:" picker (empty if not pickable).</param>
+/// <param name="MenuLabel">Label in the right-click "Change matte" submenu (empty if not pickable).</param>
 /// <param name="ApproxMb">Rough on-disk size, used only for the download notice.</param>
 /// <param name="IsHeavy">Runs at high resolution and commits gigabytes; dropped from the
 /// warm-session cache as soon as a run finishes (see App.GetMatting / EvictMatting).</param>
@@ -52,7 +52,7 @@ internal static class Models
     private static readonly Dictionary<string, ModelInfo> Known = new(StringComparer.OrdinalIgnoreCase)
     {
         ["isnet-general-use"] = new("isnet-general-use", "isnet-general-use.onnx",
-            "Matte: ISNet — general (default)", 180, IsHeavy: false, Sigmoid: false,
+            "ISNet — general (default)", 180, IsHeavy: false, Sigmoid: false,
             1024, HalfMean, UnitStd, "60920e99c45464f2ba57bee2ad08c919a52bbf852739e96947fbb4358c0d964a"),
         ["isnet-anime"] = new("isnet-anime", "isnet-anime.onnx",
             "", 180, IsHeavy: false, Sigmoid: false, 1024, HalfMean, UnitStd, null),
@@ -61,20 +61,26 @@ internal static class Models
         ["u2netp"] = new("u2netp", "u2netp.onnx",
             "", 180, IsHeavy: false, Sigmoid: false, 320, ImageNetMean, ImageNetStd, null),
         ["u2net_human_seg"] = new("u2net_human_seg", "u2net_human_seg.onnx",
-            "Matte: U2Net — people & portraits", 180, IsHeavy: false, Sigmoid: false,
+            "U2Net — people & portraits", 180, IsHeavy: false, Sigmoid: false,
             320, ImageNetMean, ImageNetStd, "01eb6a29a5c4d8edb30b56adad9bb3a2a0535338e480724a213e0acfd2d1c73c"),
         ["silueta"] = new("silueta", "silueta.onnx",
             "", 180, IsHeavy: false, Sigmoid: false, 320, ImageNetMean, ImageNetStd, null),
         ["birefnet-general"] = new("birefnet-general", "BiRefNet-general-epoch_244.onnx",
-            "Matte: BiRefNet — best (slow)", 900, IsHeavy: true, Sigmoid: true,
+            "BiRefNet — best (slow)", 900, IsHeavy: true, Sigmoid: true,
             1024, ImageNetMean, ImageNetStd, "58f621f00f5d756097615970a88a791584600dcf7c45b18a0a6267535a1ebd3c"),
+        // Swin-Tiny backbone: same 1024² input and preprocessing as birefnet-general
+        // (rembg uses one session class for both), at a quarter of the size.
+        ["birefnet-general-lite"] = new("birefnet-general-lite", "BiRefNet-general-bb_swin_v1_tiny-epoch_232.onnx",
+            "BiRefNet Lite — sharp edges", 224, IsHeavy: true, Sigmoid: true,
+            1024, ImageNetMean, ImageNetStd, "5600024376f572a557870a5eb0afb1e5961636bef4e1e22132025467d0f03333"),
     };
 
-    /// <summary>Models offered in the sticker's right-click "Matte:" picker, in menu order.</summary>
+    /// <summary>Models offered in the sticker's right-click "Change matte" submenu, in menu order.</summary>
     public static readonly IReadOnlyList<ModelInfo> Pickable = new[]
     {
         Known["isnet-general-use"],
         Known["u2net_human_seg"],
+        Known["birefnet-general-lite"],
         Known["birefnet-general"],
     };
 
@@ -98,4 +104,17 @@ internal static class Models
     }
 
     public static bool IsHeavy(string id) => For(id).IsHeavy;
+
+    /// <summary>
+    /// Short name for the "Change matte (…)" header: the menu label up to its " — "
+    /// ("ISNet", "BiRefNet Lite"), or the id itself for an unlisted custom model.
+    /// </summary>
+    public static string ShortName(string id)
+    {
+        string label = For(id).MenuLabel;
+        if (label.Length == 0)
+            return id;
+        int dash = label.IndexOf(" — ", StringComparison.Ordinal);
+        return dash > 0 ? label[..dash] : label;
+    }
 }

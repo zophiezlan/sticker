@@ -27,13 +27,36 @@ public class ModelsTests
     }
 
     [Fact]
-    public void Pickable_includes_the_three_documented_models()
+    public void Pickable_includes_the_four_documented_models()
     {
         var ids = Pickable_ids();
         Assert.Contains("isnet-general-use", ids);
         Assert.Contains("u2net_human_seg", ids);
+        Assert.Contains("birefnet-general-lite", ids);
         Assert.Contains("birefnet-general", ids);
     }
+
+    [Fact]
+    public void Birefnet_lite_shares_birefnets_recipe_and_is_pinned()
+    {
+        var lite = Models.For("birefnet-general-lite");
+        var full = Models.For("birefnet-general");
+        Assert.True(lite.IsHeavy && lite.Sigmoid);
+        Assert.Equal(full.Size, lite.Size);
+        Assert.Equal(full.Mean, lite.Mean);
+        Assert.Equal(full.Std, lite.Std);
+        Assert.NotNull(lite.Sha256);
+    }
+
+    [Theory]
+    [InlineData("isnet-general-use", "ISNet")]
+    [InlineData("u2net_human_seg", "U2Net")]
+    [InlineData("birefnet-general-lite", "BiRefNet Lite")]
+    [InlineData("birefnet-general", "BiRefNet")]
+    [InlineData("u2net", "u2net")]              // known but not pickable: no label
+    [InlineData("my-custom", "my-custom")]      // custom --model id
+    public void ShortName_is_the_label_before_the_dash_or_the_id(string id, string expected) =>
+        Assert.Equal(expected, Models.ShortName(id));
 
     [Fact]
     public void Birefnet_is_heavy_sigmoid_and_large()
