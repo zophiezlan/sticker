@@ -2,7 +2,7 @@
 
 All notable changes to Sticker are documented here.
 
-## [Unreleased]
+## [1.2.0] — 2026-11-16
 
 ### Added
 
@@ -29,6 +29,10 @@ All notable changes to Sticker are documented here.
 - **The matting models moved into a "Change matte" submenu**, whose header
   names the model in use (e.g. "Change matte (ISNet)"), keeping the sticker
   menu shorter. "Re-process current (ignore cache)" lives there too.
+- **Pasted stickers have readable names** in the tray's **Unpin sticker**
+  list — "Pasted image (2:45 pm)" instead of `clip-20261116-…-<guid>.png`.
+- Build tooling updated: the xunit test runner (4.0.1) and the CI/release
+  workflows (`actions/checkout` v7, `actions/setup-dotnet` v6).
 
 ### Changed (docs)
 

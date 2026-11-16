@@ -19,7 +19,7 @@
          localized satellite-assembly folders the (English-only) UI never uses,
          adding a few MB to the installer. -->
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
-    <Version>1.1.1</Version>
+    <Version>1.2.0</Version>
     <Product>Sticker</Product>
     <Description>Floating, background-removed image cutouts for the Windows desktop.</Description>
     <Copyright>© 2026 Zophie</Copyright>
