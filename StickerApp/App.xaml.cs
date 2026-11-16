@@ -884,16 +884,26 @@ public partial class App : Application
         }
     }
 
+    // Held across take-snapshot-and-write so writes land in order: without it, the
+    // timer thread could still be writing an older snapshot when shutdown's
+    // FlushSessionNow writes the newest one, and finish second — leaving stale state
+    // on disk (or the process could exit mid-write). Separate from _saveLock so a UI
+    // thread SaveSession never waits on disk I/O.
+    private static readonly object _flushLock = new();
+
     private static void FlushSession()
     {
-        List<StickerState>? snapshot;
-        lock (_saveLock)
+        lock (_flushLock)
         {
-            snapshot = _pendingSave;
-            _pendingSave = null;
+            List<StickerState>? snapshot;
+            lock (_saveLock)
+            {
+                snapshot = _pendingSave;
+                _pendingSave = null;
+            }
+            if (snapshot is not null)
+                Session.Save(snapshot);
         }
-        if (snapshot is not null)
-            Session.Save(snapshot);
     }
 
     /// <summary>Write any debounced session immediately — used on shutdown.</summary>

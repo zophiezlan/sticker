@@ -5,7 +5,6 @@ using System.Text;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Microsoft.ML.OnnxRuntime;
-using Microsoft.ML.OnnxRuntime.Tensors;
 using Vortice.DXGI;
 
 namespace StickerApp;
@@ -46,6 +45,7 @@ public sealed class Matting : IDisposable
     private readonly int _side;
     private readonly InferenceSession _session;
     private readonly string _inputName;
+    private readonly string _outputName;
 
     /// <summary>True if this session deliberately skipped the GPU and runs on CPU.</summary>
     public bool IsCpu { get; }
@@ -128,21 +128,30 @@ public sealed class Matting : IDisposable
         IsCpu = forceCpu
             || Environment.GetEnvironmentVariable("STICKER_FORCE_CPU") == "1";
 
-        var options = new SessionOptions();
+        // The session copies what it needs from the options at construction, so
+        // dispose them right after (they wrap a native handle).
+        using var options = new SessionOptions();
         if (!IsCpu)
         {
             try
             {
+                // DirectML requires memory-pattern optimisation off and sequential
+                // execution; ONNX Runtime would otherwise override these with a
+                // warning, so state them explicitly.
+                options.EnableMemoryPattern = false;
+                options.ExecutionMode = ExecutionMode.ORT_SEQUENTIAL;
                 options.AppendExecutionProvider_DML(PickDmlDevice());
             }
             catch
             {
                 // No DX12 adapter / DirectML unavailable — CPU is fine, just slower.
                 IsCpu = true;
+                options.EnableMemoryPattern = true;
             }
         }
         _session = new InferenceSession(ModelPathFor(model), options);
         _inputName = _session.InputMetadata.Keys.First();
+        _outputName = _session.OutputMetadata.Keys.First();
     }
 
     /// <summary>
@@ -215,12 +224,20 @@ public sealed class Matting : IDisposable
         }
     }
 
-    /// <summary>Mirror of the Python prototype's cache key: sha1(path|mtime_ns|model)[:16].</summary>
+    /// <summary>
+    /// Mirror of the Python prototype's cache key: sha1(path|mtime_ns|model)[:16].
+    /// Exception: a source with a non-trivial EXIF orientation keys on
+    /// "model|exif{n}" instead. Cutouts cached before orientation was honoured are
+    /// sideways, so they must not be reused; this also means the prototype (which
+    /// doesn't rotate either) no longer shares cutouts for those images only.
+    /// </summary>
     public static string CachePathFor(string source, string model)
     {
         string full = Path.GetFullPath(source);
         long mtimeNs = (File.GetLastWriteTimeUtc(full) - DateTime.UnixEpoch).Ticks * 100;
-        return Path.Combine(StickerPaths.CacheDir, CacheFileName(full, mtimeNs, model));
+        int orientation = ImageLoader.ReadOrientation(full);
+        string keyModel = orientation > 1 ? $"{model}|exif{orientation}" : model;
+        return Path.Combine(StickerPaths.CacheDir, CacheFileName(full, mtimeNs, keyModel));
     }
 
     /// <summary>
@@ -270,9 +287,12 @@ public sealed class Matting : IDisposable
         var (pixels, w, h) = LoadBgra(source);
         byte[] mask = Infer(pixels, w, h);
 
-        // alpha = originalAlpha * mask
-        for (int i = 0; i < w * h; i++)
-            pixels[i * 4 + 3] = (byte)(pixels[i * 4 + 3] * mask[i] / 255);
+        // alpha = originalAlpha * mask (row-parallel: tens of millions of pixels on a big photo)
+        Parallel.For(0, h, y =>
+        {
+            for (int i = y * w, end = i + w; i < end; i++)
+                pixels[i * 4 + 3] = (byte)(pixels[i * 4 + 3] * mask[i] / 255);
+        });
 
         SavePng(pixels, w, h, cached);
         return cached;
@@ -307,7 +327,9 @@ public sealed class Matting : IDisposable
     {
         var frame = BitmapFrame.Create(new Uri(path),
             BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
-        var bgra = new FormatConvertedBitmap(frame, PixelFormats.Bgra32, null, 0);
+        // Matte the image upright: WPF ignores EXIF orientation on its own.
+        var upright = ImageLoader.ApplyOrientation(frame, ImageLoader.ReadOrientation(path));
+        var bgra = new FormatConvertedBitmap(upright, PixelFormats.Bgra32, null, 0);
         int w = bgra.PixelWidth, h = bgra.PixelHeight;
 
         // Guard against degenerate or pathological dimensions before allocating.
@@ -336,10 +358,11 @@ public sealed class Matting : IDisposable
         // straight to the tensor's contiguous NCHW buffer at c*plane + y*side + x —
         // exactly the offset tensor[0,c,y,x] resolves to — skipping the multi-index
         // indexer on this ~3M-element hot path. The bilinear expression is left
-        // byte-for-byte unchanged (float multiply isn't associative).
-        var tensor = new DenseTensor<float>(new[] { 1, 3, side, side });
-        Span<float> dst = tensor.Buffer.Span;
+        // byte-for-byte unchanged (float multiply isn't associative). Rows are
+        // independent, so they're filled in parallel.
         int plane = side * side;
+        var input = new float[3 * plane];
+        float[] mean = _info.Mean, std = _info.Std;
 
         var sx0 = new int[side];
         var sx1 = new int[side];
@@ -347,7 +370,7 @@ public sealed class Matting : IDisposable
         for (int x = 0; x < side; x++)
             (sx0[x], sx1[x], sfx[x]) = Sample(x, w, side);
 
-        for (int y = 0; y < side; y++)
+        Parallel.For(0, side, y =>
         {
             (int y0, int y1, float fy) = Sample(y, h, side);
             for (int x = 0; x < side; x++)
@@ -363,20 +386,23 @@ public sealed class Matting : IDisposable
                     float v11 = pixels[(y1 * w + x1) * 4 + b];
                     float v = v00 * (1 - fx) * (1 - fy) + v01 * fx * (1 - fy)
                             + v10 * (1 - fx) * fy + v11 * fx * fy;
-                    dst[c * plane + y * side + x] = (v / 255f - _info.Mean[c]) / _info.Std[c];
+                    input[c * plane + y * side + x] = (v / 255f - mean[c]) / std[c];
                 }
             }
-        }
+        });
 
         // --- inference ---
-        using var results = _session.Run(
-            new[] { NamedOnnxValue.CreateFromTensor(_inputName, tensor) });
+        // OrtValue wraps the managed buffer directly (no copy into a tensor wrapper),
+        // and the output is read straight from native memory.
+        using var inputValue = OrtValue.CreateTensorValueFromMemory(input, new long[] { 1, 3, side, side });
+        using var runOptions = new RunOptions();
+        using var results = _session.Run(runOptions,
+            new[] { _inputName }, new[] { inputValue }, new[] { _outputName });
 
         // --- postprocess: (sigmoid for logit-output models, then) min-max normalize ---
         // The output is single-channel, contiguous NCHW [1,1,side,side], so a linear
-        // walk over its backing buffer matches output[0,0,y,x] index-for-index.
-        var output = (DenseTensor<float>)results.First().AsTensor<float>();
-        ReadOnlySpan<float> outBuf = output.Buffer.Span;
+        // walk over its buffer matches output[0,0,y,x] index-for-index.
+        ReadOnlySpan<float> outBuf = results.First().GetTensorDataAsSpan<float>();
         bool sigmoid = _info.Sigmoid;
         var small = new float[side * side];
         float min = float.MaxValue, max = float.MinValue;
@@ -413,7 +439,9 @@ public sealed class Matting : IDisposable
         for (int x = 0; x < w; x++)
             (mx0[x], mx1[x], mfx[x]) = Sample(x, side, w);
 
-        for (int y = 0; y < h; y++)
+        // Output rows are independent, so they're computed in parallel — this is the
+        // full-resolution pass, which dominates CPU time on large photos.
+        Parallel.For(0, h, y =>
         {
             (int y0, int y1, float fy) = Sample(y, side, h);
             for (int x = 0; x < w; x++)
@@ -426,7 +454,7 @@ public sealed class Matting : IDisposable
                         + small[y1 * side + x1] * fx * fy;
                 mask[y * w + x] = (byte)Math.Clamp((v - min) / range * 255f, 0f, 255f);
             }
-        }
+        });
         return mask;
     }
 

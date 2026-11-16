@@ -31,8 +31,14 @@ public partial class StickerWindow : Window
     // restore (once that cutout is cached again) reuses it instead of the fallback.
     private string? _recordedModel;
 
-    private BitmapImage _matted;
-    private BitmapImage? _original;
+    // _matted/_original are decoded no larger than the biggest monitor (see
+    // DisplayMaxSide) to save memory; _fullW/_fullH are the full-resolution upright
+    // size, which _scale is measured against (so session.json sizes are unaffected).
+    // _mattedPath points at the full-res cutout on disk, used when saving.
+    private string _mattedPath;
+    private BitmapSource _matted;
+    private BitmapSource? _original;
+    private int _fullW, _fullH;
     private bool _showingOriginal;
 
     private double _scale;
@@ -43,7 +49,7 @@ public partial class StickerWindow : Window
 
     private MenuItem? _toggleItem;
 
-    private BitmapImage Current => _showingOriginal ? _original! : _matted;
+    private BitmapSource Current => _showingOriginal ? _original! : _matted;
 
     public StickerWindow(string imagePath, string sourcePath,
                          bool noMatte = false, StickerState? state = null,
@@ -60,13 +66,17 @@ public partial class StickerWindow : Window
         // survives. New stickers record what they were matted with.
         _recordedModel = state?.Model is { Length: > 0 } intent ? intent : matteModel;
 
-        _matted = LoadBitmap(imagePath);
+        _mattedPath = imagePath;
+        var loaded = ImageLoader.Load(imagePath, DisplayMaxSide());
+        _matted = loaded.Image;
+        _fullW = loaded.FullWidth;
+        _fullH = loaded.FullHeight;
         Img.Source = _matted;
 
         // Initial size: fit within 40% of the work area.
         var area = SystemParameters.WorkArea;
-        _scale = Math.Min(1.0, Math.Min(area.Width * 0.4 / _matted.PixelWidth,
-                                        area.Height * 0.4 / _matted.PixelHeight));
+        _scale = Math.Min(1.0, Math.Min(area.Width * 0.4 / _fullW,
+                                        area.Height * 0.4 / _fullH));
 
         if (state is not null)
         {
@@ -164,17 +174,23 @@ public partial class StickerWindow : Window
             SetPinned(true);  // hwnd exists now; reapply restored pin
     }
 
-    private static BitmapImage LoadBitmap(string path, bool ignoreCache = false)
+    /// <summary>
+    /// Longest side, in physical pixels, of the largest connected monitor. A sticker
+    /// can't usefully show more detail than that, so display copies are decoded no
+    /// larger (0 = no cap, if the screens can't be read). The process is
+    /// Per-Monitor-V2 DPI aware, so Screen.Bounds are physical pixels.
+    /// </summary>
+    private static int DisplayMaxSide()
     {
-        var bmp = new BitmapImage();
-        bmp.BeginInit();
-        bmp.UriSource = new Uri(path);
-        bmp.CacheOption = BitmapCacheOption.OnLoad;
-        if (ignoreCache)
-            bmp.CreateOptions = BitmapCreateOptions.IgnoreImageCache;
-        bmp.EndInit();
-        bmp.Freeze();
-        return bmp;
+        try
+        {
+            return System.Windows.Forms.Screen.AllScreens
+                .Max(s => Math.Max(s.Bounds.Width, s.Bounds.Height));
+        }
+        catch
+        {
+            return 0;
+        }
     }
 
     /// <summary>Applies scale/rotation/flip, keeping the on-screen center put.</summary>
@@ -182,10 +198,10 @@ public partial class StickerWindow : Window
     {
         double cx = Left + ActualWidth / 2, cy = Top + ActualHeight / 2;
 
-        double w = Math.Clamp(Current.PixelWidth * _scale, MinW, MaxW);
-        _scale = w / Current.PixelWidth;
+        double w = Math.Clamp(_fullW * _scale, MinW, MaxW);
+        _scale = w / _fullW;
         Img.Width = w;
-        Img.Height = Current.PixelHeight * _scale;
+        Img.Height = _fullH * _scale;
         Rot.Angle = _rotation;
         Flip.ScaleX = _flipped ? -1 : 1;
 
@@ -374,7 +390,7 @@ public partial class StickerWindow : Window
         if (_noMatte)
             return;
         _showingOriginal = !_showingOriginal;
-        _original ??= LoadBitmap(_sourcePath);
+        _original ??= ImageLoader.Load(_sourcePath, DisplayMaxSide()).Image;
         Img.Source = Current;
         if (_toggleItem is not null)
             _toggleItem.Header = _showingOriginal ? "Show cutout" : "Show original";
@@ -392,8 +408,12 @@ public partial class StickerWindow : Window
         if (dialog.ShowDialog() != true)
             return;
 
-        // Render the full-resolution matte with current flip/rotation applied.
-        var src = _matted;
+        // Render the full-resolution matte with current flip/rotation applied. The
+        // on-screen copy may be downscaled, so reload the full-res cutout from disk;
+        // if it's gone (e.g. "Clear matte cache"), fall back to the display copy.
+        BitmapSource src;
+        try { src = ImageLoader.Load(_mattedPath).Image; }
+        catch { src = _matted; }
         double w = src.PixelWidth, h = src.PixelHeight;
         var (bw, bh) = RotatedBounds(w, h, _rotation);
 
@@ -515,7 +535,11 @@ public partial class StickerWindow : Window
     private async Task RematteCore(string? model, bool forceCpu, bool force)
     {
         string path = await App.RematteAsync(_sourcePath, model, forceCpu, force);
-        _matted = LoadBitmap(path, ignoreCache: true);
+        var loaded = ImageLoader.Load(path, DisplayMaxSide(), ignoreCache: true);
+        _mattedPath = path;
+        _matted = loaded.Image;
+        _fullW = loaded.FullWidth;
+        _fullH = loaded.FullHeight;
         if (!_showingOriginal)
             Img.Source = _matted;
         ApplyVisuals(keepCenter: true);

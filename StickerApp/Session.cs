@@ -30,12 +30,26 @@ public static class Session
 
     private static readonly JsonSerializerOptions Options = new() { WriteIndented = true };
 
+    private static readonly object WriteLock = new();
+
+    /// <summary>
+    /// Write the session atomically: serialize to a sibling temp file, then rename it
+    /// over session.json. A crash or power loss mid-write leaves the previous session
+    /// intact instead of a truncated file. Writers are serialized so two saves can't
+    /// collide on the temp file.
+    /// </summary>
     public static void Save(IEnumerable<StickerState> states)
     {
         try
         {
-            Directory.CreateDirectory(StickerPaths.CacheDir);
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(states.ToList(), Options));
+            string json = JsonSerializer.Serialize(states.ToList(), Options);
+            lock (WriteLock)
+            {
+                Directory.CreateDirectory(StickerPaths.CacheDir);
+                string tmp = FilePath + ".tmp";
+                File.WriteAllText(tmp, json);
+                File.Move(tmp, FilePath, overwrite: true);
+            }
         }
         catch (Exception)
         {

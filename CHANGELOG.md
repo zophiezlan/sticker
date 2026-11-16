@@ -2,6 +2,34 @@
 
 All notable changes to Sticker are documented here.
 
+## [1.1.1] — 2026-11-16
+
+### Fixed
+
+- **Phone photos no longer appear sideways.** Sticker now honours the EXIF
+  orientation tag when matting, when showing the original, and when saving a
+  cutout. Cutouts cached for rotated photos before this fix are not reused, so
+  those photos are matted again once (other images keep their cached cutouts).
+- **The saved session can no longer be corrupted by a crash or power loss
+  mid-save.** `session.json` is now written to a temporary file and swapped into
+  place, and overlapping saves (e.g. a pending save racing the one on exit) are
+  serialised so the newest state always wins.
+
+### Changed
+
+- **Lower memory use for large images.** Stickers are decoded no larger than
+  your biggest monitor instead of at full resolution; "Save cutout as PNG"
+  still writes the full-resolution result.
+- **Faster matting on large photos.** Pre-processing, mask upscaling and alpha
+  compositing now use all CPU cores, and inference uses ONNX Runtime's
+  `OrtValue` API, which avoids an extra copy of the input.
+- DirectML sessions now set the options DirectML requires explicitly, and
+  their native settings handles are released after loading.
+- The installer no longer ships unused localized WPF/WinForms resource folders.
+- Test packages updated (Microsoft.NET.Test.Sdk 18.12.0, xunit 2.9.3,
+  xunit.runner.visualstudio 3.1.5); Dependabot now opens weekly update PRs, and
+  release builds run the test suite before publishing.
+
 ## [1.1.0] — 2026-06-19
 
 ### Added

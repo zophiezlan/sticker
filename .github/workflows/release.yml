@@ -20,6 +20,10 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
+      # A tag pushed from a broken commit shouldn't ship: run the suite first.
+      - name: Test
+        run: dotnet test Sticker.slnx -c Release
+
       - name: Version from tag
         id: ver
         shell: bash
