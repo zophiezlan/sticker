@@ -547,7 +547,7 @@ public partial class App : Application
     {
         var menu = new WinForms.ContextMenuStrip
         {
-            Renderer = new WinForms.ToolStripProfessionalRenderer(new DarkColorTable()),
+            Renderer = new DarkMenuRenderer(),
             ForeColor = Drawing.Color.FromArgb(240, 240, 240),
             // Image margin stays on: WinForms draws check glyphs there.
         };
@@ -662,13 +662,40 @@ public partial class App : Application
         public override Drawing.Color CheckBackground => Hover;
         public override Drawing.Color CheckSelectedBackground => Hover;
         public override Drawing.Color CheckPressedBackground => Hover;
-        // An item whose submenu is open (e.g. "Unpin sticker") draws as "pressed";
-        // without these it falls back to the light system highlight.
-        public override Drawing.Color MenuItemPressedGradientBegin => Hover;
-        public override Drawing.Color MenuItemPressedGradientMiddle => Hover;
-        public override Drawing.Color MenuItemPressedGradientEnd => Hover;
         public override Drawing.Color MenuItemSelectedGradientBegin => Hover;
         public override Drawing.Color MenuItemSelectedGradientEnd => Hover;
+
+        public static Drawing.Color HoverColor => Hover;
+    }
+
+    /// <summary>
+    /// ToolStripProfessionalRenderer only honours its color table when WinForms
+    /// visual styles are enabled. A WPF host never enables them, so it falls back to
+    /// system colors for the two state-dependent pieces — a light-blue hover/open-
+    /// submenu highlight and a blue box behind check marks. Paint those ourselves.
+    /// </summary>
+    private sealed class DarkMenuRenderer : WinForms.ToolStripProfessionalRenderer
+    {
+        private static readonly Drawing.Font CheckFont = new("Segoe MDL2 Assets", 9f);
+
+        public DarkMenuRenderer() : base(new DarkColorTable()) { }
+
+        protected override void OnRenderMenuItemBackground(WinForms.ToolStripItemRenderEventArgs e)
+        {
+            if (!e.Item.IsOnDropDown || !e.Item.Selected || !e.Item.Enabled)
+            {
+                base.OnRenderMenuItemBackground(e);
+                return;
+            }
+            // Selected stays true while the item's submenu is open, so this covers both.
+            using var brush = new Drawing.SolidBrush(DarkColorTable.HoverColor);
+            e.Graphics.FillRectangle(brush, new Drawing.Rectangle(2, 0, e.Item.Width - 4, e.Item.Height));
+        }
+
+        protected override void OnRenderItemCheck(WinForms.ToolStripItemImageRenderEventArgs e) =>
+            WinForms.TextRenderer.DrawText(e.Graphics, "", CheckFont, e.ImageRectangle, e.Item.ForeColor,
+                WinForms.TextFormatFlags.HorizontalCenter | WinForms.TextFormatFlags.VerticalCenter
+                | WinForms.TextFormatFlags.NoPadding);
     }
 
     private void PickAndOpen()

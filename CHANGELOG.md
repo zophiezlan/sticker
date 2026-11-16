@@ -32,6 +32,10 @@ All notable changes to Sticker are documented here.
 
 ### Fixed
 
+- **The tray menu's hover highlight and check marks now match its dark
+  theme.** They were drawn in Windows' light-blue system highlight, because
+  WinForms ignores custom menu colors unless visual styles are enabled, which
+  a WPF app never does.
 - The README no longer suggests `STICKER_BIREFNET_SIZE=768` as an
   out-of-memory fix: the standard BiRefNet downloads only accept 1024 input,
   so other sizes fail.
