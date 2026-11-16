@@ -19,3 +19,7 @@ __pycache__
 # IDE
 .vs/
 *.user
+
+# Nested project build output (tools/*)
+**/bin/
+**/obj/
